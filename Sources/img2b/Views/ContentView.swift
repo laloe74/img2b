@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Binding var imageItems: [ImageItem]
@@ -25,7 +26,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedItemIDs) {
+            List {
                 Section {
                     if imageItems.isEmpty {
                         Text("No images yet")
@@ -36,6 +37,7 @@ struct ContentView: View {
                         SidebarRow(
                             item: item,
                             isSelected: previewItemID == item.id,
+                            selectedItemIDs: $selectedItemIDs,
                             config: r2Config,
                             uploader: uploader,
                             clipboard: clipboard,
@@ -47,6 +49,14 @@ struct ContentView: View {
                             onDelete: { handleDelete(item) }
                         )
                         .tag(item.id)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if previewItemID == item.id {
+                                previewItemID = nil
+                            } else {
+                                previewItemID = item.id
+                            }
+                        }
                     }
                     .onDelete { indexSet in
                         for idx in indexSet { handleDelete(imageItems[idx]) }
@@ -59,21 +69,25 @@ struct ContentView: View {
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
-            ZStack {
-                DropZoneView(
-                    imageItems: $imageItems,
-                    processor: processor,
-                    isProcessing: $isProcessing,
-                    processingProgress: $processingProgress,
-                    currentStep: $currentStep,
-                    r2Config: r2Config
-                )
-
+            VStack {
                 if let item = selectedItem {
                     previewView(for: item)
+                } else {
+                    DropZoneView(
+                        imageItems: $imageItems,
+                        processor: processor,
+                        isProcessing: $isProcessing,
+                        processingProgress: $processingProgress,
+                        currentStep: $currentStep,
+                        r2Config: r2Config
+                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                handleDetailDrop(providers: providers)
+                return true
+            }
         }
         .toolbar {
             if !imageItems.isEmpty, r2Config.categories.count > 1 {
@@ -169,7 +183,6 @@ struct ContentView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .allowsHitTesting(false)
             } else if case .uploaded(let url) = item.status, let imageURL = URL(string: url) {
                 AsyncImage(url: imageURL) { phase in
                     switch phase {
@@ -184,7 +197,6 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .allowsHitTesting(false)
             } else {
                 ContentUnavailableView(
                     "No Preview",
@@ -263,6 +275,65 @@ struct ContentView: View {
         let items = imageItems.filter { selectedItemIDs.contains($0.id) }
         for item in items { handleDelete(item) }
     }
+
+    private func handleDetailDrop(providers: [NSItemProvider]) {
+        let count = providers.count
+        let results = UnsafeMutablePointer<URL?>.allocate(capacity: count)
+        results.initialize(repeating: nil, count: count)
+        let group = DispatchGroup()
+
+        for (i, provider) in providers.enumerated() {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                defer { group.leave() }
+                if let data = item as? Data { results[i] = URL(dataRepresentation: data, relativeTo: nil) }
+            }
+        }
+
+        group.notify(queue: .main) {
+            let urls = (0..<count).compactMap { results[$0] }
+            results.deallocate()
+
+            let validURLs = urls.filter { url in
+                guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+                let supported: [UTType] = [.png, .jpeg, .tiff, .bmp, .gif, .webP, .heic, .heif, .icns, .rawImage, .image]
+                return supported.contains(where: { type.conforms(to: $0) || $0.conforms(to: type) })
+            }
+            guard !validURLs.isEmpty else { return }
+
+            isProcessing = true
+            processingProgress = (0, validURLs.count)
+
+            Task {
+                for (index, url) in validURLs.enumerated() {
+                    let item = ImageItem(originalURL: url)
+                    imageItems.append(item)
+
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+                    do {
+                        let processed = try await processor.processImage(
+                            at: url, quality: r2Config.quality,
+                            lossless: r2Config.useLossless,
+                            maxSizeKB: r2Config.maxFileSizeKB,
+                            namePattern: r2Config.namePattern,
+                            onStep: { step in DispatchQueue.main.async { currentStep = step ?? "" } }
+                        )
+                        if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
+                            imageItems[idx] = processed
+                        }
+                    } catch {
+                        if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
+                            imageItems[idx].status = .error(error.localizedDescription)
+                        }
+                    }
+                    processingProgress = (index + 1, validURLs.count)
+                }
+                isProcessing = false
+            }
+        }
+    }
     private func deleteFromR2(_ item: ImageItem) {
         if let idx = imageItems.firstIndex(where: { $0.id == item.id }) { imageItems[idx].status = .processing }
         Task {
@@ -312,21 +383,35 @@ struct ContentView: View {
 struct SidebarRow: View {
     let item: ImageItem
     let isSelected: Bool
+    @Binding var selectedItemIDs: Set<UUID>
     let config: R2Config
     let uploader: R2Uploader
     let clipboard: ClipboardService
     let onUpdate: (ImageItem) -> Void
     let onDelete: () -> Void
 
-    init(item: ImageItem, isSelected: Bool, config: R2Config, uploader: R2Uploader, clipboard: ClipboardService,
+    init(item: ImageItem, isSelected: Bool, selectedItemIDs: Binding<Set<UUID>>,
+         config: R2Config, uploader: R2Uploader, clipboard: ClipboardService,
          onUpdate: @escaping (ImageItem) -> Void, onDelete: @escaping () -> Void) {
         self.item = item; self.isSelected = isSelected
+        self._selectedItemIDs = selectedItemIDs
         self.config = config; self.uploader = uploader
         self.clipboard = clipboard; self.onUpdate = onUpdate; self.onDelete = onDelete
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
+            Toggle("Select", isOn: Binding(
+                get: { selectedItemIDs.contains(item.id) },
+                set: { checked in
+                    if checked { selectedItemIDs.insert(item.id) }
+                    else { selectedItemIDs.remove(item.id) }
+                }
+            ))
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .padding(.top, 1)
+
             statusIcon
                 .padding(.top, 5)
 
