@@ -26,7 +26,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $previewItemID) {
+            List {
                 Section {
                     if imageItems.isEmpty {
                         Text("No images yet")
@@ -38,6 +38,7 @@ struct ContentView: View {
                             item: item,
                             isSelected: previewItemID == item.id,
                             selectedItemIDs: $selectedItemIDs,
+                            previewItemID: $previewItemID,
                             config: r2Config,
                             uploader: uploader,
                             clipboard: clipboard,
@@ -48,7 +49,6 @@ struct ContentView: View {
                             },
                             onDelete: { handleDelete(item) }
                         )
-                        .tag(item.id)
                     }
                     .onDelete { indexSet in
                         for idx in indexSet { handleDelete(imageItems[idx]) }
@@ -370,6 +370,7 @@ struct SidebarRow: View {
     let item: ImageItem
     let isSelected: Bool
     @Binding var selectedItemIDs: Set<UUID>
+    var previewItemID: Binding<UUID?>?
     let config: R2Config
     let uploader: R2Uploader
     let clipboard: ClipboardService
@@ -377,10 +378,12 @@ struct SidebarRow: View {
     let onDelete: () -> Void
 
     init(item: ImageItem, isSelected: Bool, selectedItemIDs: Binding<Set<UUID>>,
+         previewItemID: Binding<UUID?>? = nil,
          config: R2Config, uploader: R2Uploader, clipboard: ClipboardService,
          onUpdate: @escaping (ImageItem) -> Void, onDelete: @escaping () -> Void) {
         self.item = item; self.isSelected = isSelected
         self._selectedItemIDs = selectedItemIDs
+        self.previewItemID = previewItemID
         self.config = config; self.uploader = uploader
         self.clipboard = clipboard; self.onUpdate = onUpdate; self.onDelete = onDelete
     }
@@ -401,10 +404,14 @@ struct SidebarRow: View {
             .buttonStyle(.plain)
             .padding(.top, 1)
 
-            statusIcon
-                .padding(.top, 5)
+            Button {
+                previewItemID?.wrappedValue = item.id
+            } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    statusIcon
+                        .padding(.top, 5)
 
-            if case .processing = item.status {
+                    if case .processing = item.status {
                 VStack(alignment: .leading, spacing: 4) {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color.secondary.opacity(0.15))
@@ -455,6 +462,9 @@ struct SidebarRow: View {
                     }
                 }
             }
+                }
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 3)
         .contextMenu {
