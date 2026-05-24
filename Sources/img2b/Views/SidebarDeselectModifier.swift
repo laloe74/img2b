@@ -1,23 +1,20 @@
 import SwiftUI
 import AppKit
 
-/// Monitors mouse clicks and deselects sidebar when clicking empty List area.
 struct SidebarClickHandler: ViewModifier {
-    @Binding var selectedItemID: UUID?
-
+    @Binding var selectedItemIDs: Set<UUID>
     @State private var token: Any?
 
     func body(content: Content) -> some View {
         content
             .onAppear {
                 token = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
-                    guard selectedItemID != nil,
+                    guard !selectedItemIDs.isEmpty,
                           let contentView = event.window?.contentView else { return event }
 
                     let point = contentView.convert(event.locationInWindow, from: nil)
                     guard let hitView = contentView.hitTest(point) else { return event }
 
-                    // Check if the click landed on a sidebar TableView row
                     var v: NSView? = hitView
                     var foundTableView = false
                     var foundRow = false
@@ -28,9 +25,8 @@ struct SidebarClickHandler: ViewModifier {
                         v = v?.superview
                     }
 
-                    // Click on sidebar empty space (tableView found, but no row)
                     if foundTableView && !foundRow {
-                        DispatchQueue.main.async { selectedItemID = nil }
+                        DispatchQueue.main.async { selectedItemIDs = [] }
                     }
 
                     return event
@@ -43,7 +39,7 @@ struct SidebarClickHandler: ViewModifier {
 }
 
 extension View {
-    func onSidebarEmptyClick(selectedItemID: Binding<UUID?>) -> some View {
-        modifier(SidebarClickHandler(selectedItemID: selectedItemID))
+    func onSidebarEmptyClick(selectedItemIDs: Binding<Set<UUID>>) -> some View {
+        modifier(SidebarClickHandler(selectedItemIDs: selectedItemIDs))
     }
 }

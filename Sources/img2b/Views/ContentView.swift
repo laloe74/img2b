@@ -15,15 +15,16 @@ struct ContentView: View {
     @State private var currentStep = ""
     @State private var showDeleteConfirm = false
     @State private var itemToDelete: ImageItem?
-    @State private var selectedItemID: UUID?
+    @State private var selectedItemIDs: Set<UUID> = []
 
     private var selectedItem: ImageItem? {
-        imageItems.first { $0.id == selectedItemID }
+        guard let id = selectedItemIDs.first else { return nil }
+        return imageItems.first { $0.id == id }
     }
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedItemID) {
+            List(selection: $selectedItemIDs) {
                 Section {
                     if imageItems.isEmpty {
                         Text("No images yet")
@@ -33,7 +34,7 @@ struct ContentView: View {
                         ForEach(imageItems) { item in
                         SidebarRow(
                             item: item,
-                            isSelected: selectedItemID == item.id,
+                            isSelected: selectedItemIDs.contains(item.id),
                             config: r2Config,
                             uploader: uploader,
                             clipboard: clipboard,
@@ -73,7 +74,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
-            .onTapGesture { selectedItemID = nil }
+            .onTapGesture { selectedItemIDs = [] }
         }
         .toolbar {
             if !imageItems.isEmpty, r2Config.categories.count > 1 {
@@ -84,7 +85,7 @@ struct ContentView: View {
                                 guard let sel = selectedItem else { return }
                                 if let idx = imageItems.firstIndex(where: { $0.id == sel.id }) {
                                     imageItems[idx].category = cat
-                                    selectedItemID = sel.id
+                                    selectedItemIDs = [sel.id]
                                 }
                             } label: {
                                 Image(systemName: categoryIcon(for: cat))
@@ -123,6 +124,12 @@ struct ContentView: View {
         .safeAreaInset(edge: .bottom) {
             if !imageItems.isEmpty {
                 HStack(spacing: 12) {
+                    if !selectedItemIDs.isEmpty {
+                        Button(action: deleteSelected) {
+                            Label("Delete (\(selectedItemIDs.count))", systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                    }
                     if !uploadedOnly.isEmpty {
                         Button(action: copyAll) {
                             Label("Copy TOML (\(uploadedOnly.count))", systemImage: "doc.on.clipboard")
@@ -141,8 +148,8 @@ struct ContentView: View {
         } message: { item in
             Text("\"\(item.title).heic\" will be permanently deleted from R2 storage.")
         }
-        .onExitCommand { selectedItemID = nil }
-        .onSidebarEmptyClick(selectedItemID: $selectedItemID)
+        .onExitCommand { selectedItemIDs = [] }
+        .onSidebarEmptyClick(selectedItemIDs: $selectedItemIDs)
         .onAppear { Task { await updater.checkForUpdates() } }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             showSettings = true
@@ -198,7 +205,7 @@ struct ContentView: View {
                 .allowsHitTesting(false)
                 Spacer()
                     .allowsHitTesting(false)
-                Button { selectedItemID = nil } label: {
+                Button { selectedItemIDs = [] } label: {
                     Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -241,8 +248,13 @@ struct ContentView: View {
         }
     }
     private func removeFromList(_ item: ImageItem) {
-        if selectedItemID == item.id { selectedItemID = nil }
+        selectedItemIDs.remove(item.id)
         imageItems.removeAll { $0.id == item.id }
+    }
+
+    private func deleteSelected() {
+        let items = imageItems.filter { selectedItemIDs.contains($0.id) }
+        for item in items { handleDelete(item) }
     }
     private func deleteFromR2(_ item: ImageItem) {
         if let idx = imageItems.firstIndex(where: { $0.id == item.id }) { imageItems[idx].status = .processing }
