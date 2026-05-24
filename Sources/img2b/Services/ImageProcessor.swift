@@ -56,24 +56,18 @@ struct ImageProcessor: Sendable {
         onStep?("Converting (Q\(q))...")
         var encoded = try encode(data: workingData, quality: q, lossless: lossless)
 
-        // Step 2: step down quality until it fits (80 → 60 → 40)
+        // Step 2: step down quality to hit target (80, then 65 minimum)
         if !lossless, encoded.count > maxBytes {
-            for q2 in [80, 60, 40] where encoded.count > maxBytes {
+            for q2 in [80, 65] where encoded.count > maxBytes {
                 onStep?("Recompressing (Q\(q2))...")
                 encoded = try encode(data: workingData, quality: q2, lossless: false)
             }
         }
 
-        // Step 3: resize + mid quality
+        // Step 3: resize to 1920px at Q75 — quality floor
         if !lossless, encoded.count > maxBytes {
             onStep?("Resizing to 1920px...")
-            encoded = try encodeResized(data: workingData, maxDimension: 1920, quality: 60)
-        }
-
-        // Step 4: resize + low quality fallback
-        if !lossless, encoded.count > maxBytes {
-            onStep?("Resizing to 1024px...")
-            encoded = try encodeResized(data: workingData, maxDimension: 1024, quality: 40)
+            encoded = try encodeResized(data: workingData, maxDimension: 1920, quality: 75)
         }
 
         try encoded.write(to: outputURL)
