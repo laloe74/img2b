@@ -372,7 +372,7 @@ struct SidebarRow: View {
                 .modifier(ShimmerModifier(isSelected: isSelected))
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title + ".heic")
+                    Text(item.displayName)
                         .font(.system(.callout, design: .rounded))
                         .foregroundStyle(isSelected ? Color.white : Color.primary)
                         .lineLimit(1).truncationMode(.middle)
