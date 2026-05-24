@@ -16,9 +16,10 @@ struct ContentView: View {
     @State private var showDeleteConfirm = false
     @State private var itemToDelete: ImageItem?
     @State private var selectedItemIDs: Set<UUID> = []
+    @State private var previewItemID: UUID?
 
     private var selectedItem: ImageItem? {
-        guard let id = selectedItemIDs.first else { return nil }
+        guard let id = previewItemID else { return nil }
         return imageItems.first { $0.id == id }
     }
 
@@ -34,7 +35,7 @@ struct ContentView: View {
                         ForEach(imageItems) { item in
                         SidebarRow(
                             item: item,
-                            isSelected: selectedItemIDs.contains(item.id),
+                            isSelected: previewItemID == item.id,
                             config: r2Config,
                             uploader: uploader,
                             clipboard: clipboard,
@@ -80,11 +81,10 @@ struct ContentView: View {
                     HStack(spacing: 4) {
                         ForEach(r2Config.categories, id: \.self) { cat in
                             Button {
-                                guard let sel = selectedItem else { return }
-                                if let idx = imageItems.firstIndex(where: { $0.id == sel.id }) {
-                                    imageItems[idx].category = cat
-                                    selectedItemIDs = [sel.id]
-                                }
+                                guard let id = previewItemID,
+                                      let idx = imageItems.firstIndex(where: { $0.id == id })
+                                else { return }
+                                imageItems[idx].category = cat
                             } label: {
                                 Image(systemName: categoryIcon(for: cat))
                                     .font(.system(size: 14, weight: .medium))
@@ -146,7 +146,12 @@ struct ContentView: View {
         } message: { item in
             Text("\"\(item.title).heic\" will be permanently deleted from R2 storage.")
         }
-        .onExitCommand { selectedItemIDs = [] }
+        .onChange(of: selectedItemIDs) { _, new in
+            if previewItemID == nil || !new.contains(previewItemID!) {
+                previewItemID = new.first
+            }
+        }
+        .onExitCommand { selectedItemIDs = []; previewItemID = nil }
         .onSidebarEmptyClick(selectedItemIDs: $selectedItemIDs)
         .onAppear { Task { await updater.checkForUpdates() } }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
@@ -203,7 +208,7 @@ struct ContentView: View {
                 .allowsHitTesting(false)
                 Spacer()
                     .allowsHitTesting(false)
-                Button { selectedItemIDs = [] } label: {
+                Button { selectedItemIDs = []; previewItemID = nil } label: {
                     Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -223,7 +228,9 @@ struct ContentView: View {
     }
 
     private func isSelected(_ cat: String) -> Bool {
-        guard let sel = selectedItem else { return false }
+        guard let id = previewItemID,
+              let sel = imageItems.first(where: { $0.id == id })
+        else { return false }
         return sel.category == cat
     }
 
