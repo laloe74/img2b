@@ -7,9 +7,7 @@ cask "img2b" do
   desc "macOS blog image hosting tool — drag, compress, upload, TOML"
   homepage "https://github.com/laloe74/img2b"
 
-  depends_on formula: "vips"
-
-  app "img2b.app"
+app "img2b.app"
 
   zap trash: [
     "~/Library/Application Support/img2b",

@@ -59,7 +59,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     var displayName: String {
-        originalFilename.isEmpty ? (title + ".webp") : originalFilename
+        originalFilename.isEmpty ? (title + ".avif") : originalFilename
     }
 
     var formattedOriginalSize: String {

@@ -15,14 +15,6 @@ brew install --cask img2b
 
 从 [Releases](https://github.com/laloe74/img2b/releases) 下载 DMG，拖入 Applications。
 
-### 依赖
-
-需要安装 libvips（图片压缩引擎）：
-
-```bash
-brew install vips
-```
-
 ## 使用
 
 ### 1. 配置图床
