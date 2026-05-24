@@ -82,28 +82,11 @@ struct ImageProcessor: Sendable {
                   let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
             else { throw Error.loadFailed }
 
-            // Ensure RGB color space for AVIF compatibility
-            let rgbImage: CGImage
-            if cgImage.colorSpace?.model != .rgb {
-                let ctx = CGContext(
-                    data: nil,
-                    width: cgImage.width, height: cgImage.height,
-                    bitsPerComponent: 8, bytesPerRow: 0,
-                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                )!
-                ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
-                guard let converted = ctx.makeImage() else { throw Error.encodeFailed }
-                rgbImage = converted
-            } else {
-                rgbImage = cgImage
-            }
-
             let output = NSMutableData()
             guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
             else { throw Error.encodeFailed }
 
-            CGImageDestinationAddImage(dest, rgbImage, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
+            CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
 
             guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
             return output as Data
@@ -119,18 +102,16 @@ struct ImageProcessor: Sendable {
             let w = CGFloat(cgImage.width)
             let h = CGFloat(cgImage.height)
             let scale = min(CGFloat(maxDimension) / max(w, h), 1.0)
-            let nw = Int(w * scale)
-            let nh = Int(h * scale)
 
             guard let ctx = CGContext(
-                data: nil, width: nw, height: nh,
+                data: nil, width: Int(w * scale), height: Int(h * scale),
                 bitsPerComponent: 8, bytesPerRow: 0,
                 space: cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
                 bitmapInfo: cgImage.bitmapInfo.rawValue
             ) else { throw Error.encodeFailed }
 
             ctx.interpolationQuality = .high
-            ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: nw, height: nh))
+            ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: Int(w * scale), height: Int(h * scale)))
 
             guard let resized = ctx.makeImage() else { throw Error.encodeFailed }
 
@@ -138,7 +119,7 @@ struct ImageProcessor: Sendable {
             guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
             else { throw Error.encodeFailed }
 
-            CGImageDestinationAddImage(dest, resized, nil)
+            CGImageDestinationAddImage(dest, resized, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
 
             guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
             return output as Data
