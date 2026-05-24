@@ -38,7 +38,7 @@ struct ImageProcessor: Sendable {
 
         let maxBytes = maxSizeKB * 1024
 
-        // Pre-resize huge images — avoid OOM and encoder limits
+        // Pre-resize huge images — resize only, keep lossless intermediate
         var workingData = data
         if let source = CGImageSourceCreateWithData(data as CFData, nil),
            let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -46,8 +46,8 @@ struct ImageProcessor: Sendable {
            let h = props[kCGImagePropertyPixelHeight] as? Int,
            max(w, h) > 4000 {
             onStep?("Pre-resizing \(w)x\(h)...")
-            if let resized = try? encodeResized(data: data, maxDimension: 4000, quality: quality) {
-                workingData = resized
+            if let resizedPNG = try? resizeToPNG(data: data, maxDimension: 4000) {
+                workingData = resizedPNG
             }
         }
 
@@ -95,6 +95,35 @@ struct ImageProcessor: Sendable {
         CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
 
         guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed("finalize failed, \(cgImage.width)x\(cgImage.height)") }
+        return output as Data
+    }
+
+    private func resizeToPNG(data: Data, maxDimension: Int) throws -> Data {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { throw Error.loadFailed("resize: \(data.count) bytes") }
+
+        let w = CGFloat(cgImage.width); let h = CGFloat(cgImage.height)
+        let scale = min(CGFloat(maxDimension) / max(w, h), 1.0)
+
+        guard let ctx = CGContext(
+            data: nil, width: Int(w * scale), height: Int(h * scale),
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: cgImage.bitmapInfo.rawValue
+        ) else { throw Error.encodeFailed("CGContext failed") }
+
+        ctx.interpolationQuality = .high
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: Int(w * scale), height: Int(h * scale)))
+
+        guard let resized = ctx.makeImage() else { throw Error.encodeFailed("makeImage failed") }
+
+        // Save as lossless PNG intermediate
+        let output = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(output, "public.png" as CFString, 1, nil)
+        else { throw Error.encodeFailed("PNG encoder unavailable") }
+        CGImageDestinationAddImage(dest, resized, nil)
+        guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed("PNG finalize failed") }
         return output as Data
     }
 
