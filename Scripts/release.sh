@@ -43,14 +43,14 @@ DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 DMG_TMP="/tmp/${APP_NAME}-dmg"
 rm -rf "$DMG_TMP"
 mkdir -p "$DMG_TMP"
-cp -R "$HOME/Desktop/${APP_NAME}.app" "$DMG_TMP/"
+cp -R "$BUILD_DIR/$APP_NAME.app" "$DMG_TMP/"
 ln -s /Applications "$DMG_TMP/Applications"
-hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_TMP" -ov -format UDZO "$HOME/Desktop/$DMG_NAME" 2>&1
+hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_TMP" -ov -format UDZO "/tmp/$DMG_NAME" 2>&1
 rm -rf "$DMG_TMP"
-echo "Package: $HOME/Desktop/$DMG_NAME"
+echo "Package: /tmp/$DMG_NAME"
 
 # Update cask SHA256
-SHA256=$(shasum -a 256 "$HOME/Desktop/$DMG_NAME" | cut -d' ' -f1)
+SHA256=$(shasum -a 256 "/tmp/$DMG_NAME" | cut -d' ' -f1)
 echo "SHA256: $SHA256"
 sed -i '' "s/sha256.*/sha256 \"$SHA256\"/" "$PROJECT_DIR/Casks/img2b.rb"
 sed -i '' "s/^  version.*/  version \"${VERSION#v}\"/" "$PROJECT_DIR/Casks/img2b.rb"
@@ -80,7 +80,7 @@ git push origin main --tags
 # GitHub release
 if command -v gh &>/dev/null; then
     gh release create "$VERSION" \
-        "$HOME/Desktop/$DMG_NAME" \
+        "/tmp/$DMG_NAME" \
         --title "$VERSION" \
         --notes "$CHANGES"
     echo
@@ -90,7 +90,8 @@ else
     echo "=== Tag $VERSION pushed. Install gh CLI for auto-release: brew install gh ==="
 fi
 
+# Clean up temp files
+rm -f "/tmp/$DMG_NAME"
+
 echo
 echo "=== Done: $VERSION ==="
-echo "Desktop: $HOME/Desktop/${APP_NAME}.app"
-echo "Package: $HOME/Desktop/$DMG_NAME"
