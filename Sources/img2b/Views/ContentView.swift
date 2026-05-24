@@ -26,7 +26,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List {
+            List(selection: $previewItemID) {
                 Section {
                     if imageItems.isEmpty {
                         Text("No images yet")
@@ -49,14 +49,6 @@ struct ContentView: View {
                             onDelete: { handleDelete(item) }
                         )
                         .tag(item.id)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if previewItemID == item.id {
-                                previewItemID = nil
-                            } else {
-                                previewItemID = item.id
-                            }
-                        }
                     }
                     .onDelete { indexSet in
                         for idx in indexSet { handleDelete(imageItems[idx]) }
@@ -160,13 +152,7 @@ struct ContentView: View {
         } message: { item in
             Text("\"\(item.title).heic\" will be permanently deleted from R2 storage.")
         }
-        .onChange(of: selectedItemIDs) { _, new in
-            if previewItemID == nil || !new.contains(previewItemID!) {
-                previewItemID = new.first
-            }
-        }
         .onExitCommand { selectedItemIDs = []; previewItemID = nil }
-        .onSidebarEmptyClick(selectedItemIDs: $selectedItemIDs)
         .onAppear { Task { await updater.checkForUpdates() } }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             showSettings = true
@@ -401,15 +387,18 @@ struct SidebarRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Toggle("Select", isOn: Binding(
-                get: { selectedItemIDs.contains(item.id) },
-                set: { checked in
-                    if checked { selectedItemIDs.insert(item.id) }
-                    else { selectedItemIDs.remove(item.id) }
+            Button {
+                if selectedItemIDs.contains(item.id) {
+                    selectedItemIDs.remove(item.id)
+                } else {
+                    selectedItemIDs.insert(item.id)
                 }
-            ))
-            .toggleStyle(.checkbox)
-            .labelsHidden()
+            } label: {
+                Image(systemName: selectedItemIDs.contains(item.id) ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 14))
+                    .foregroundStyle(selectedItemIDs.contains(item.id) ? .blue : .secondary)
+            }
+            .buttonStyle(.plain)
             .padding(.top, 1)
 
             statusIcon
