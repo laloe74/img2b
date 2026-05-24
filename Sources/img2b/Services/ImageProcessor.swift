@@ -36,22 +36,31 @@ struct ImageProcessor: Sendable {
         let tempDir = FileManager.default.temporaryDirectory
         let outputURL = tempDir.appendingPathComponent("\(item.title).avif")
 
-        // Step 1
+        let maxBytes = maxSizeKB * 1024
+
+        // Step 1: requested quality
         let q = min(100, max(1, quality))
         onStep?("Converting (Q\(q))...")
         var encoded = try await encode(data: data, quality: q, lossless: lossless)
 
-        // Step 2: retry with higher compression
-        if !lossless, encoded.count > maxSizeKB * 1024 {
-            onStep?("Recompressing...")
-            let q2 = max(50, q - 20)
-            encoded = try await encode(data: data, quality: q2, lossless: false)
+        // Step 2: step down quality until it fits (80 → 60 → 40)
+        if !lossless, encoded.count > maxBytes {
+            for q2 in [80, 60, 40] where encoded.count > maxBytes {
+                onStep?("Recompressing (Q\(q2))...")
+                encoded = try await encode(data: data, quality: q2, lossless: false)
+            }
         }
 
-        // Step 3: resize
-        if !lossless, encoded.count > maxSizeKB * 1024 {
-            onStep?("Resizing...")
-            encoded = try await encodeResized(data: data, maxDimension: 1920, quality: q)
+        // Step 3: resize + mid quality
+        if !lossless, encoded.count > maxBytes {
+            onStep?("Resizing to 1920px...")
+            encoded = try await encodeResized(data: data, maxDimension: 1920, quality: 60)
+        }
+
+        // Step 4: resize + low quality fallback
+        if !lossless, encoded.count > maxBytes {
+            onStep?("Resizing to 1024px...")
+            encoded = try await encodeResized(data: data, maxDimension: 1024, quality: 40)
         }
 
         try encoded.write(to: outputURL)
