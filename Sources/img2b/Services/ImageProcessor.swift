@@ -94,7 +94,7 @@ struct ImageProcessor: Sendable {
             guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
             else { throw Error.encodeFailed }
 
-            CGImageDestinationAddImage(dest, rgbImage, nil)
+            CGImageDestinationAddImage(dest, rgbImage, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
 
             guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
             return output as Data
