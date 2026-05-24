@@ -73,12 +73,28 @@ struct ImageProcessor: Sendable {
                   let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
             else { throw Error.loadFailed }
 
+            // Ensure RGB color space for AVIF compatibility
+            let rgbImage: CGImage
+            if cgImage.colorSpace?.model != .rgb {
+                let ctx = CGContext(
+                    data: nil,
+                    width: cgImage.width, height: cgImage.height,
+                    bitsPerComponent: 8, bytesPerRow: 0,
+                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                )!
+                ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+                guard let converted = ctx.makeImage() else { throw Error.encodeFailed }
+                rgbImage = converted
+            } else {
+                rgbImage = cgImage
+            }
+
             let output = NSMutableData()
             guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
             else { throw Error.encodeFailed }
 
-            let q = CGFloat(quality) / 100.0
-            CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: q] as CFDictionary)
+            CGImageDestinationAddImage(dest, rgbImage, nil)
 
             guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
             return output as Data
@@ -113,8 +129,7 @@ struct ImageProcessor: Sendable {
             guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
             else { throw Error.encodeFailed }
 
-            let q = CGFloat(quality) / 100.0
-            CGImageDestinationAddImage(dest, resized, [kCGImageDestinationLossyCompressionQuality: q] as CFDictionary)
+            CGImageDestinationAddImage(dest, resized, nil)
 
             guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
             return output as Data

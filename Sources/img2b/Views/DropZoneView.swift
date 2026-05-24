@@ -100,6 +100,9 @@ struct DropZoneView: View {
                     let item = ImageItem(originalURL: url)
                     imageItems.append(item)
 
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
                     do {
                         let processed = try await processor.processImage(
                             at: url,
