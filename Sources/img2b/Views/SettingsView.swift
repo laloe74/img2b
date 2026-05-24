@@ -1,0 +1,176 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @Binding var config: R2Config
+
+    @State private var endpoint: String
+    @State private var accessKeyId: String
+    @State private var secretAccessKey: String
+    @State private var bucketName: String
+    @State private var publicURLBase: String
+    @State private var quality: Double
+    @State private var useLossless: Bool
+    @State private var maxFileSizeKB: Double
+    @State private var namePattern: String
+    @State private var tomlFilePath: String
+    @State private var tomlTemplate: String
+    @State private var categories: [String]
+    @State private var defaultCategory: String
+    @State private var newCategory: String = ""
+
+    @Environment(\.dismiss) private var dismiss
+
+    init(config: Binding<R2Config>) {
+        self._config = config
+        self._endpoint = State(initialValue: config.wrappedValue.endpoint)
+        self._accessKeyId = State(initialValue: config.wrappedValue.accessKeyId)
+        self._secretAccessKey = State(initialValue: config.wrappedValue.secretAccessKey)
+        self._bucketName = State(initialValue: config.wrappedValue.bucketName)
+        self._publicURLBase = State(initialValue: config.wrappedValue.publicURLBase)
+        self._quality = State(initialValue: Double(config.wrappedValue.quality))
+        self._useLossless = State(initialValue: config.wrappedValue.useLossless)
+        self._namePattern = State(initialValue: config.wrappedValue.namePattern)
+        self._tomlFilePath = State(initialValue: config.wrappedValue.tomlFilePath)
+        self._tomlTemplate = State(initialValue: config.wrappedValue.tomlTemplate)
+        self._maxFileSizeKB = State(initialValue: Double(config.wrappedValue.maxFileSizeKB))
+        self._categories = State(initialValue: config.wrappedValue.categories)
+        self._defaultCategory = State(initialValue: config.wrappedValue.defaultCategory)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Settings").font(.headline)
+                Spacer()
+                Button("Done") { save(); dismiss() }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .keyboardShortcut(.return)
+            }
+            .padding()
+
+            Divider()
+
+            Form {
+                // MARK: R2 Bucket
+                Section {
+                    TextField("Account ID", text: $endpoint, prompt: Text("account-id or hostname"))
+                        .disableAutocorrection(true)
+                    TextField("Access Key ID", text: $accessKeyId, prompt: Text("access-key-id"))
+                        .disableAutocorrection(true)
+                    SecureField("Secret Access Key", text: $secretAccessKey, prompt: Text("secret-access-key"))
+                        .disableAutocorrection(true)
+                    TextField("Bucket Name", text: $bucketName, prompt: Text("my-images"))
+                        .disableAutocorrection(true)
+                    TextField("Public URL Base", text: $publicURLBase, prompt: Text("https://image.example.com"))
+                        .disableAutocorrection(true)
+                } header: { Text("R2 Bucket") } footer: {
+                    Text("Account ID auto-appends .r2.cloudflarestorage.com. Or enter full hostname.")
+                }
+
+                Section {
+                    TextField("Name Pattern", text: $namePattern, prompt: Text("img-{hash16}-{date}"))
+                        .disableAutocorrection(true)
+                        .font(.system(.body, design: .monospaced))
+                } header: { Text("File Naming") } footer: {
+                    Text("{hash16} {hash8} {hash} {date}")
+                }
+
+                Section {
+                    TextField("TOML File Path", text: $tomlFilePath, prompt: Text("~/blog/content/photos.toml"))
+                        .disableAutocorrection(true)
+                        .font(.system(.body, design: .monospaced))
+                } header: { Text("TOML Output") } footer: {
+                    Text("Uploaded entries will be prepended to this file. Supports ~ tilde expansion.")
+                }
+
+                Section {
+                    TextEditor(text: $tomlTemplate)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 100)
+                        .disableAutocorrection(true)
+                } header: { Text("TOML Template") } footer: {
+                    Text("{category} {date} {date8} {title} {url}")
+                }
+
+                Section {
+                    HStack {
+                        TextField("New Category", text: $newCategory, prompt: Text("weekly"))
+                        Button("Add") {
+                            let t = newCategory.trimmingCharacters(in: .whitespaces)
+                            if !t.isEmpty, !categories.contains(t) {
+                                categories.append(t)
+                                if categories.count == 1 { defaultCategory = t }
+                                newCategory = ""
+                            }
+                        }
+                        .disabled(newCategory.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    ForEach(Array(categories.enumerated()), id: \.element) { idx, cat in
+                        HStack {
+                            Image(systemName: defaultCategory == cat ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(defaultCategory == cat ? .blue : .secondary)
+                            Text(cat)
+                            Spacer()
+                            Button("Set Default") { defaultCategory = cat }.font(.caption)
+                            Button { if idx > 0 { categories.swapAt(idx, idx - 1) } }
+                                label: { Image(systemName: "chevron.up").font(.caption) }
+                                .buttonStyle(.plain).disabled(idx == 0)
+                            Button { if idx < categories.count - 1 { categories.swapAt(idx, idx + 1) } }
+                                label: { Image(systemName: "chevron.down").font(.caption) }
+                                .buttonStyle(.plain).disabled(idx == categories.count - 1)
+                            Button(role: .destructive) {
+                                categories.removeAll { $0 == cat }
+                                if defaultCategory == cat { defaultCategory = categories.first ?? "" }
+                            } label: { Image(systemName: "trash").font(.caption) }
+                                .buttonStyle(.plain).foregroundStyle(.red)
+                        }
+                    }
+                } header: { Text("Categories") }
+
+                // MARK: Image Compression
+                Section {
+                    Toggle("Lossless", isOn: $useLossless)
+
+                    if !useLossless {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Quality"); Spacer()
+                                Text("\(Int(quality))%").foregroundStyle(.secondary).fontDesign(.monospaced)
+                            }
+                            Slider(value: $quality, in: 75...100, step: 1)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Max File Size"); Spacer()
+                                Text("\(Int(maxFileSizeKB)) KB").foregroundStyle(.secondary).fontDesign(.monospaced)
+                            }
+                            Slider(value: $maxFileSizeKB, in: 100...2000, step: 50)
+                        }
+                    }
+                } header: { Text("Image Compression") } footer: {
+                    Text(useLossless ? "Pixel-perfect, large files." : "Auto-retries then resizes to meet target size.")
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .frame(width: 460, height: 520)
+    }
+
+    private func save() {
+        config.endpoint = endpoint.trimmingCharacters(in: .whitespaces)
+        config.accessKeyId = accessKeyId.trimmingCharacters(in: .whitespaces)
+        config.secretAccessKey = secretAccessKey.trimmingCharacters(in: .whitespaces)
+        config.bucketName = bucketName.trimmingCharacters(in: .whitespaces)
+        config.publicURLBase = publicURLBase.trimmingCharacters(in: .whitespaces)
+        config.quality = Int(quality)
+        config.useLossless = useLossless
+        config.namePattern = namePattern.trimmingCharacters(in: .whitespaces)
+        config.tomlFilePath = tomlFilePath.trimmingCharacters(in: .whitespaces)
+        config.tomlTemplate = tomlTemplate
+        config.maxFileSizeKB = Int(maxFileSizeKB)
+        config.categories = categories
+        config.defaultCategory = defaultCategory
+        config.save()
+    }
+}
