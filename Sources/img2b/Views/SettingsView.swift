@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Binding var config: R2Config
+    @Binding var imageItems: [ImageItem]
 
     @State private var endpoint: String
     @State private var accessKeyId: String
@@ -14,14 +15,16 @@ struct SettingsView: View {
     @State private var namePattern: String
     @State private var tomlFilePath: String
     @State private var tomlTemplate: String
-    @State private var categories: [String]
+    @State private var categories: [CategoryItem]
     @State private var defaultCategory: String
     @State private var newCategory: String = ""
+    @State private var renames: [String: String] = [:]  // old -> new
 
     @Environment(\.dismiss) private var dismiss
 
-    init(config: Binding<R2Config>) {
+    init(config: Binding<R2Config>, imageItems: Binding<[ImageItem]>) {
         self._config = config
+        self._imageItems = imageItems
         self._endpoint = State(initialValue: config.wrappedValue.endpoint)
         self._accessKeyId = State(initialValue: config.wrappedValue.accessKeyId)
         self._secretAccessKey = State(initialValue: config.wrappedValue.secretAccessKey)
@@ -63,66 +66,73 @@ struct SettingsView: View {
                         .disableAutocorrection(true)
                     TextField("Public URL Base", text: $publicURLBase, prompt: Text("https://image.example.com"))
                         .disableAutocorrection(true)
-                } header: { Text("R2 Bucket") } footer: {
-                    Text("Account ID auto-appends .r2.cloudflarestorage.com. Or enter full hostname.")
-                }
+                } header: { Text("Cloudflare R2") }
 
                 Section {
                     TextField("Name Pattern", text: $namePattern, prompt: Text("img-{hash16}-{date}"))
                         .disableAutocorrection(true)
                         .font(.system(.body, design: .monospaced))
-                } header: { Text("File Naming") } footer: {
-                    Text("{hash16} {hash8} {hash} {date}")
-                }
+                } header: { Text("File Naming") }
 
                 Section {
                     TextField("TOML File Path", text: $tomlFilePath, prompt: Text("~/blog/content/photos.toml"))
                         .disableAutocorrection(true)
                         .font(.system(.body, design: .monospaced))
-                } header: { Text("TOML Output") } footer: {
-                    Text("Uploaded entries will be prepended to this file. Supports ~ tilde expansion.")
-                }
+                } header: { Text("TOML Output") }
 
                 Section {
                     TextEditor(text: $tomlTemplate)
                         .font(.system(.body, design: .monospaced))
                         .frame(minHeight: 100)
                         .disableAutocorrection(true)
-                } header: { Text("TOML Template") } footer: {
-                    Text("{category} {date} {date8} {title} {url} {width} {height}")
-                }
+                } header: { Text("TOML Template") }
 
+                // MARK: Categories
                 Section {
                     HStack {
                         TextField("New Category", text: $newCategory, prompt: Text("weekly"))
                         Button("Add") {
                             let t = newCategory.trimmingCharacters(in: .whitespaces)
-                            if !t.isEmpty, !categories.contains(t) {
-                                categories.append(t)
+                            if !t.isEmpty, t.lowercased() != "none", !categories.contains(where: { $0.name == t }) {
+                                categories.append(CategoryItem(name: t, icon: CategoryItem.defaultIcon))
                                 if categories.count == 1 { defaultCategory = t }
                                 newCategory = ""
                             }
                         }
                         .disabled(newCategory.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
-                    ForEach(Array(categories.enumerated()), id: \.element) { idx, cat in
-                        HStack {
-                            Image(systemName: defaultCategory == cat ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(defaultCategory == cat ? .blue : .secondary)
-                            Text(cat)
-                            Spacer()
-                            Button("Set Default") { defaultCategory = cat }.font(.caption)
-                            Button { if idx > 0 { categories.swapAt(idx, idx - 1) } }
-                                label: { Image(systemName: "chevron.up").font(.caption) }
-                                .buttonStyle(.plain).disabled(idx == 0)
-                            Button { if idx < categories.count - 1 { categories.swapAt(idx, idx + 1) } }
-                                label: { Image(systemName: "chevron.down").font(.caption) }
-                                .buttonStyle(.plain).disabled(idx == categories.count - 1)
-                            Button(role: .destructive) {
-                                categories.removeAll { $0 == cat }
-                                if defaultCategory == cat { defaultCategory = categories.first ?? "" }
-                            } label: { Image(systemName: "trash").font(.caption) }
-                                .buttonStyle(.plain).foregroundStyle(.red)
+                    ForEach($categories) { $cat in
+                        if cat.name != "none" {
+                            HStack(spacing: 8) {
+                                Menu {
+                                    ForEach(CategoryItem.defaults) { def in
+                                        Button { cat.icon = def.icon } label: {
+                                            Label(def.name, systemImage: def.icon)
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: cat.icon).frame(width: 20)
+                                }
+                                .menuStyle(.borderlessButton)
+
+                                TextField("", text: $cat.name)
+                                    .textFieldStyle(.plain)
+                                    .onSubmit {
+                                        let old = renames.first(where: { $0.value == cat.name })?.key
+                                            ?? config.categories.first(where: { $0.id == cat.id })?.name
+                                        if let old, old != cat.name { renames[old] = cat.name }
+                                    }
+
+                                Spacer()
+
+                                Button(role: .destructive) {
+                                    categories.removeAll { $0.name == cat.name }
+                                    if defaultCategory == cat.name { defaultCategory = categories.first?.name ?? "" }
+                                } label: {
+                                    Image(systemName: "trash").font(.caption)
+                                }
+                                .buttonStyle(.borderless).foregroundStyle(.red)
+                            }
                         }
                     }
                 } header: { Text("Categories") }
@@ -148,13 +158,11 @@ struct SettingsView: View {
                             Slider(value: $maxFileSizeKB, in: 100...2000, step: 50)
                         }
                     }
-                } header: { Text("Image Compression") } footer: {
-                    Text(useLossless ? "Pixel-perfect, large files." : "Auto-retries then resizes to meet target size.")
-                }
+                } header: { Text("Image Compression") }
             }
             .formStyle(.grouped)
         }
-        .frame(width: 460, height: 520)
+        .frame(width: 460, height: 560)
     }
 
     private func save() {
@@ -169,6 +177,13 @@ struct SettingsView: View {
         config.tomlFilePath = tomlFilePath.trimmingCharacters(in: .whitespaces)
         config.tomlTemplate = tomlTemplate
         config.maxFileSizeKB = Int(maxFileSizeKB)
+        // Apply renames to existing items
+        for (old, new) in renames where old != new {
+            for i in imageItems.indices where imageItems[i].category == old {
+                imageItems[i].category = new
+            }
+            if defaultCategory == old { defaultCategory = new }
+        }
         config.categories = categories
         config.defaultCategory = defaultCategory
         config.save()

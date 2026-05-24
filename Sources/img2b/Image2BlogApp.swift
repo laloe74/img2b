@@ -42,11 +42,13 @@ private func loadItems() -> [ImageItem] {
     guard let data = try? Data(contentsOf: R2Config.itemsURL),
           let items = try? JSONDecoder().decode([ImageItem].self, from: data)
     else { return [] }
-    // Reset processing/uploading statuses from previous session
+    let defaultCategory = R2Config.load().defaultCategory
+    // Reset processing/uploading statuses from previous session, migrate empty categories
     return items.map { item in
         var i = item
         if case .processing = i.status { i.status = .error("Interrupted") }
         if case .uploading = i.status { i.status = .ready }
+        if i.category.isEmpty { i.category = defaultCategory }
         return i
     }
 }

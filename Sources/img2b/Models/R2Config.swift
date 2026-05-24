@@ -1,5 +1,21 @@
 import Foundation
 
+struct CategoryItem: Codable, Equatable, Hashable, Identifiable {
+    var name: String
+    var icon: String
+
+    var id: String { name }
+
+    static let defaultIcon = "tag"
+    static let defaults: [CategoryItem] = [
+        CategoryItem(name: "none", icon: "circle"),
+        CategoryItem(name: "design", icon: "paintpalette"),
+        CategoryItem(name: "photography", icon: "camera"),
+        CategoryItem(name: "physics", icon: "atom"),
+        CategoryItem(name: "typography", icon: "textformat"),
+    ]
+}
+
 struct R2Config: Codable, Equatable {
     var endpoint: String = ""
     var accessKeyId: String = ""
@@ -20,8 +36,14 @@ struct R2Config: Codable, Equatable {
         width = {width}
         height = {height}
         """
-    var categories: [String] = ["design", "photography", "physics", "typography"]
-    var defaultCategory: String = "design"
+    var categories: [CategoryItem] = CategoryItem.defaults
+    var defaultCategory: String = "none"
+
+    var categoryNames: [String] { categories.map(\.name) }
+
+    func icon(for category: String) -> String {
+        categories.first { $0.name == category }?.icon ?? CategoryItem.defaultIcon
+    }
 
     var isValid: Bool {
         !endpoint.isEmpty && !accessKeyId.isEmpty
@@ -71,9 +93,22 @@ struct R2Config: Codable, Equatable {
 
         let decoder = JSONDecoder()
         do {
-            return try decoder.decode(R2Config.self, from: data)
+            var config = try decoder.decode(R2Config.self, from: data)
+            var needsSave = false
+            // Ensure "none" category exists
+            if !config.categoryNames.contains("none") {
+                config.categories.insert(CategoryItem(name: "none", icon: "circle"), at: 0)
+                config.defaultCategory = "none"
+                needsSave = true
+            }
+            if config.defaultCategory.isEmpty || !config.categoryNames.contains(config.defaultCategory) {
+                config.defaultCategory = config.categories.first?.name ?? "none"
+                needsSave = true
+            }
+            if needsSave { config.save() }
+            return config
         } catch {
-            // Try to salvage: decode what we can, keep defaults for new fields
+            // Try to salvage
             if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 var config = R2Config()
                 config.endpoint = dict["endpoint"] as? String ?? dict["accountId"] as? String ?? ""
@@ -87,12 +122,25 @@ struct R2Config: Codable, Equatable {
                 config.namePattern = dict["namePattern"] as? String ?? "img-{hash16}-{date}"
                 config.tomlFilePath = dict["tomlFilePath"] as? String ?? ""
                 config.tomlTemplate = dict["tomlTemplate"] as? String ?? config.tomlTemplate
-                config.categories = dict["categories"] as? [String] ?? ["design", "photography", "physics", "typography"]
-                config.defaultCategory = dict["defaultCategory"] as? String ?? dict["category"] as? String ?? "design"
-                // Migrate old single category
-                if config.categories.count <= 1 {
-                    config.categories = ["design", "photography", "physics", "typography"]
-                    config.defaultCategory = "design"
+
+                // Migrate from old string array
+                if let cats = dict["categories"] as? [String] {
+                    config.categories = cats.map { CategoryItem(name: $0, icon: CategoryItem.defaultIcon) }
+                } else if let cats = dict["categories"] as? [[String: String]] {
+                    config.categories = cats.compactMap { dict in
+                        guard let name = dict["name"] else { return nil }
+                        return CategoryItem(name: name, icon: dict["icon"] ?? CategoryItem.defaultIcon)
+                    }
+                }
+                if config.categories.isEmpty {
+                    config.categories = CategoryItem.defaults
+                }
+                if !config.categoryNames.contains("none") {
+                    config.categories.insert(CategoryItem(name: "none", icon: "circle"), at: 0)
+                }
+                config.defaultCategory = dict["defaultCategory"] as? String ?? dict["category"] as? String ?? "none"
+                if config.defaultCategory.isEmpty || !config.categoryNames.contains(config.defaultCategory) {
+                    config.defaultCategory = config.categories.first?.name ?? "none"
                 }
                 config.save()
                 return config

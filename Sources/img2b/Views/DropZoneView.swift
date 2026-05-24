@@ -102,8 +102,9 @@ struct DropZoneView: View {
                 var firstID: UUID?
                 for url in validURLs {
                     let item = ImageItem(originalURL: url)
-                    imageItems.insert(item, at: 0)
-                    newIDs.insert(item.id)
+                    var newItem = item; newItem.category = r2Config.defaultCategory
+                    imageItems.insert(newItem, at: 0)
+                    newIDs.insert(newItem.id)
                     if firstID == nil { firstID = item.id }
                 }
                 onNewItems?(newIDs, firstID)
@@ -123,7 +124,9 @@ struct DropZoneView: View {
                             onStep: { step in DispatchQueue.main.async { currentStep = step ?? "" } }
                         )
                         var updated = processed
-                        updated.id = imageItems[idx].id  // preserve original ID
+                        updated.id = imageItems[idx].id
+                        updated.category = imageItems[idx].category
+                        updated.originalFilename = imageItems[idx].originalFilename
                         imageItems[idx] = updated
                     } catch {
                         imageItems[idx].status = .error(error.localizedDescription)

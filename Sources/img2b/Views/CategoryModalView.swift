@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Category Modal
 
 struct CategoryModalView: View {
-    @Binding var categories: [String]
+    @Binding var categories: [CategoryItem]
     @Binding var defaultCategory: String
     var onDismiss: () -> Void
 
@@ -12,50 +12,36 @@ struct CategoryModalView: View {
     @FocusState private var isFocused: Bool
 
     private let iconOptions: [(name: String, label: String)] = [
-        ("tag", "Tag"),
-        ("folder", "Folder"),
-        ("photo", "Photo"),
-        ("camera", "Camera"),
-        ("paintpalette", "Art"),
-        ("pencil.and.ruler", "Design"),
-        ("textformat", "Text"),
-        ("link", "Link"),
-        ("globe", "Globe"),
-        ("star", "Star"),
-        ("heart", "Heart"),
-        ("book", "Book"),
-        ("music.note", "Music"),
-        ("film", "Film"),
-        ("square.grid.2x2", "Grid"),
-        ("sparkles", "Spark"),
+        ("circle", "Circle"), ("tag", "Tag"), ("folder", "Folder"),
+        ("photo", "Photo"), ("camera", "Camera"), ("paintpalette", "Art"),
+        ("pencil.and.ruler", "Design"), ("textformat", "Text"), ("link", "Link"),
+        ("globe", "Globe"), ("star", "Star"), ("heart", "Heart"),
+        ("book", "Book"), ("music.note", "Music"), ("film", "Film"),
+        ("atom", "Atom"), ("sparkles", "Spark"), ("square.grid.2x2", "Grid"),
+        ("circle.dotted.circle", "Physics"), ("building.2", "Building"),
+        ("doc.richtext", "Typography"),
     ]
 
     private var isValid: Bool {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
-        return !trimmed.isEmpty && !categories.contains(trimmed)
+        return !trimmed.isEmpty && !categories.contains(where: { $0.name == trimmed })
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             HStack {
-                Text("New Category")
-                    .font(.headline)
+                Text("New Category").font(.headline)
                 Spacer()
                 Button(action: onDismiss) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .font(.title3).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
+            .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 16)
 
             Divider()
 
-            // Body
             VStack(spacing: 16) {
                 TextField("Category name", text: $name)
                     .textFieldStyle(.roundedBorder)
@@ -64,10 +50,7 @@ struct CategoryModalView: View {
                     .font(.body)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Icon")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
+                    Text("Icon").font(.subheadline).foregroundStyle(.secondary)
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 8), spacing: 4) {
                         ForEach(iconOptions, id: \.name) { icon in
                             Button {
@@ -76,15 +59,12 @@ struct CategoryModalView: View {
                                 Image(systemName: icon.name)
                                     .font(.system(size: 16))
                                     .frame(width: 32, height: 32)
-                                    .background(
-                                        selectedIcon == icon.name
-                                            ? RoundedRectangle(cornerRadius: 6).fill(.blue)
-                                            : RoundedRectangle(cornerRadius: 6).fill(.clear)
-                                    )
+                                    .background(selectedIcon == icon.name
+                                        ? RoundedRectangle(cornerRadius: 6).fill(.blue)
+                                        : RoundedRectangle(cornerRadius: 6).fill(.clear))
                                     .foregroundStyle(selectedIcon == icon.name ? .white : .secondary)
                             }
-                            .buttonStyle(.plain)
-                            .help(icon.label)
+                            .buttonStyle(.plain).help(icon.label)
                         }
                     }
                 }
@@ -93,14 +73,10 @@ struct CategoryModalView: View {
 
             Divider()
 
-            // Footer
             HStack(spacing: 12) {
                 Spacer()
-                Button("Cancel", action: onDismiss)
-                    .keyboardShortcut(.escape, modifiers: [])
-                Button("Add") { add() }
-                    .keyboardShortcut(.return, modifiers: [])
-                    .disabled(!isValid)
+                Button("Cancel", action: onDismiss).keyboardShortcut(.escape, modifiers: [])
+                Button("Add") { add() }.keyboardShortcut(.return, modifiers: []).disabled(!isValid)
             }
             .padding(20)
         }
@@ -116,8 +92,8 @@ struct CategoryModalView: View {
 
     private func add() {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, !categories.contains(trimmed) else { return }
-        categories.append(trimmed)
+        guard !trimmed.isEmpty, !categories.contains(where: { $0.name == trimmed }) else { return }
+        categories.append(CategoryItem(name: trimmed, icon: selectedIcon))
         if categories.count == 1 { defaultCategory = trimmed }
         onDismiss()
     }
@@ -127,7 +103,7 @@ struct CategoryModalView: View {
 
 struct CategoryModalModifier: ViewModifier {
     @Binding var isPresented: Bool
-    @Binding var categories: [String]
+    @Binding var categories: [CategoryItem]
     @Binding var defaultCategory: String
     var onSave: () -> Void
 
@@ -150,7 +126,7 @@ struct CategoryModalModifier: ViewModifier {
                 .animation(.spring(response: 0.28, dampingFraction: 0.82), value: isPresented)
             }
         }
-        .onChange(of: categories) { _, _ in onSave() }
+        .onChange(of: categories.count) { _, _ in onSave() }
     }
 
     private func dismiss() {
@@ -163,7 +139,7 @@ struct CategoryModalModifier: ViewModifier {
 extension View {
     func categoryModal(
         isPresented: Binding<Bool>,
-        categories: Binding<[String]>,
+        categories: Binding<[CategoryItem]>,
         defaultCategory: Binding<String>,
         onSave: @escaping () -> Void = {}
     ) -> some View {

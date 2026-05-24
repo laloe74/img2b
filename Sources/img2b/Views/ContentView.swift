@@ -16,7 +16,7 @@ struct ContentView: View {
     @State private var processingProgress: (current: Int, total: Int) = (0, 0)
     @State private var currentStep = ""
     @State private var showDeleteConfirm = false
-    @State private var itemToDelete: ImageItem?
+    @State private var itemsToDelete: [ImageItem] = []
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var previewItemID: UUID?
     @State private var showCategoryModal = false
@@ -36,129 +36,32 @@ struct ContentView: View {
                             .font(.callout)
                             .foregroundStyle(.tertiary)
                     } else {
-                        ForEach(imageItems) { item in
-                            SidebarRow(
-                                item: item,
-                                isSelected: selectedItemIDs.contains(item.id),
-                                config: r2Config,
-                                uploader: uploader,
-                                clipboard: clipboard,
-                                onUpdate: { updated in
-                                    if let idx = imageItems.firstIndex(where: { $0.id == updated.id }) {
-                                        imageItems[idx] = updated
-                                    }
-                                },
-                                onDelete: { handleDelete(item) }
-                            )
-                            .tag(item.id)
-                        }
-                        .onDelete { indexSet in
-                            for idx in indexSet { handleDelete(imageItems[idx]) }
-                        }
+                        sidebarRows
                     }
                 } header: {
-                    Text("Image List")
+                    sidebarHeader
                 }
             }
             .listStyle(.sidebar)
             .onSidebarEmptyClick(selectedItemIDs: $selectedItemIDs)
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
-            VStack {
-                if let item = selectedItem {
-                    previewView(for: item)
-                } else {
-                    DropZoneView(
-                        imageItems: $imageItems,
-                        processor: processor,
-                        isProcessing: $isProcessing,
-                        processingProgress: $processingProgress,
-                        currentStep: $currentStep,
-                        r2Config: r2Config,
-                        onNewItems: { ids, firstID in
-                            selectedItemIDs = ids
-                            previewItemID = firstID
-                            NSApp.activate(ignoringOtherApps: true)
-                        }
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-                handleDetailDrop(providers: providers)
-                return true
-            }
+            detailContent
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .navigation) {
-                Button(action: deleteSelected) {
-                    Image(systemName: "trash")
-                }
-                .disabled(selectedItemIDs.isEmpty)
-                .help("Delete (\(selectedItemIDs.count))")
-                .tint(.red)
-                if !uploadedOnly.isEmpty {
-                    Button(action: copyAll) {
-                        Image(systemName: "doc.on.clipboard")
-                    }
-                    .help("Copy TOML (\(uploadedOnly.count))")
-                }
-            }
-            if !imageItems.isEmpty, r2Config.categories.count > 1 {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 4) {
-                        ForEach(r2Config.categories, id: \.self) { cat in
-                            Button {
-                                guard let sel = selectedItem,
-                                      let idx = imageItems.firstIndex(where: { $0.id == sel.id })
-                                else { return }
-                                imageItems[idx].category = cat
-                            } label: {
-                                Image(systemName: categoryIcon(for: cat))
-                                    .font(.system(size: 14, weight: .medium))
-                            }
-                            .buttonStyle(.borderless)
-                            .frame(width: 30, height: 30)
-                            .background(isSelected(cat) ? Circle().fill(.blue) : Circle().fill(.clear))
-                            .foregroundStyle(isSelected(cat) ? .white : .secondary)
-                            .help(cat)
-                        }
-                        Button {
-                            showCategoryModal = true
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 12, weight: .bold))
-                        }
-                        .buttonStyle(.borderless)
-                        .frame(width: 30, height: 30)
-                        .background(Circle().fill(.clear))
-                        .foregroundStyle(.secondary)
-                        .help("New category")
-                    }
-                    .padding(4)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                }
-            }
-            ToolbarItemGroup {
-                if !readyItems.isEmpty {
-                    Button(action: uploadAll) {
-                        Label("Upload All (\(readyItems.count))", systemImage: "icloud.and.arrow.up")
-                    }
-                }
-                Button(action: { showSettings = true }) {
-                    Label("Settings", systemImage: "gearshape")
-                }
-            }
-        }
+        .toolbar { appToolbar }
         .sheet(isPresented: $showSettings) {
-            SettingsView(config: $r2Config)
+            SettingsView(config: $r2Config, imageItems: $imageItems)
         }
-        .confirmationDialog("Delete from R2?", isPresented: $showDeleteConfirm, presenting: itemToDelete) { item in
-            Button("Delete from R2", role: .destructive) { deleteFromR2(item) }
-            Button("Remove from List Only") { removeFromList(item) }
+        .confirmationDialog("Delete from R2?", isPresented: $showDeleteConfirm) {
+            Button("Delete from R2 (\(itemsToDelete.count))", role: .destructive) {
+                for item in itemsToDelete { deleteFromR2(item) }
+            }
+            Button("Remove from List Only") {
+                for item in itemsToDelete { removeFromList(item) }
+            }
             Button("Cancel", role: .cancel) {}
-        } message: { item in
-            Text("\"\(item.title).avif\" will be permanently deleted from R2 storage.")
+        } message: {
+            Text("\(itemsToDelete.count) file(s) will be permanently deleted from R2 storage.")
         }
         .categoryModal(
             isPresented: $showCategoryModal,
@@ -175,6 +78,113 @@ struct ContentView: View {
         .onAppear { Task { await updater.checkForUpdates() } }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             showSettings = true
+        }
+    }
+
+    private var detailContent: some View {
+        VStack {
+            if let item = selectedItem {
+                previewView(for: item)
+            } else {
+                DropZoneView(
+                    imageItems: $imageItems,
+                    processor: processor,
+                    isProcessing: $isProcessing,
+                    processingProgress: $processingProgress,
+                    currentStep: $currentStep,
+                    r2Config: r2Config,
+                    onNewItems: { ids, firstID in
+                        selectedItemIDs = ids
+                        previewItemID = firstID
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handleDetailDrop(providers: providers)
+            return true
+        }
+    }
+
+    private var sidebarRows: some View {
+        ForEach(imageItems) { item in
+            SidebarRow(
+                item: item,
+                isSelected: selectedItemIDs.contains(item.id),
+                config: r2Config,
+                uploader: uploader,
+                clipboard: clipboard,
+                onUpdate: { updateItem($0) },
+                onDelete: { handleDelete(item) }
+            )
+            .tag(item.id)
+        }
+        .onDelete { indexSet in
+            for idx in indexSet { handleDelete(imageItems[idx]) }
+        }
+    }
+
+    private var sidebarHeader: some View {
+        Text("Image List")
+    }
+
+    @ToolbarContentBuilder
+    private var appToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Button(action: uploadSelected) {
+                Image(systemName: "icloud.and.arrow.up")
+            }
+            .disabled(selectedUploadable.isEmpty)
+            .help("Upload Selected")
+            Button(action: deleteSelected) {
+                Image(systemName: "trash")
+            }
+            .disabled(selectedItemIDs.isEmpty)
+            .help("Delete")
+            .tint(.red)
+            if !uploadedOnly.isEmpty {
+                Button(action: copyAll) {
+                    Image(systemName: "doc.on.clipboard")
+                }
+                .help("Copy TOML")
+            }
+        }
+        if !imageItems.isEmpty, r2Config.categories.count > 1 {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 4) {
+                    ForEach(r2Config.categories) { cat in
+                        Button { setCategory(cat.name) } label: {
+                            Image(systemName: cat.icon)
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .buttonStyle(.borderless)
+                        .frame(width: 30, height: 30)
+                        .background(isSelected(cat.name) ? Circle().fill(.blue) : Circle().fill(.clear))
+                        .foregroundStyle(isSelected(cat.name) ? .white : .secondary)
+                        .help(cat.name)
+                    }
+                    Button {
+                        showCategoryModal = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .buttonStyle(.borderless)
+                    .frame(width: 30, height: 30)
+                    .foregroundStyle(.secondary)
+                    .help("New category")
+                }
+                .padding(4)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            }
+        }
+        ToolbarItemGroup {
+            Button(action: { showSettings = true }) {
+                Image(systemName: "gearshape")
+            }
+            .help("Settings")
         }
     }
 
@@ -292,20 +302,31 @@ struct ContentView: View {
         return props[kCGImagePropertyColorModel] as? String
     }
 
+    private var selectedUploadable: [ImageItem] {
+        imageItems.filter { item in
+            if case .ready = item.status { return selectedItemIDs.contains(item.id) }
+            return false
+        }
+    }
+
     private var readyItems: [ImageItem] {
-        imageItems.filter { if case .ready = $0.status { !$0.category.isEmpty } else { false } }
+        imageItems.filter { if case .ready = $0.status { true } else { false } }
     }
     private var uploadedOnly: [ImageItem] {
         imageItems.filter { if case .uploaded = $0.status { true } else { false } }
     }
 
-    private func categoryIcon(for cat: String) -> String {
-        switch cat.lowercased() {
-        case "design": return "building.2"
-        case "photography": return "camera"
-        case "physics": return "circle.dotted.circle"
-        case "typography": return "doc.richtext"
-        default: return "tag"
+
+    private func setCategory(_ name: String) {
+        guard let sel = selectedItem,
+              let idx = imageItems.firstIndex(where: { $0.id == sel.id })
+        else { return }
+        imageItems[idx].category = name
+    }
+
+    private func updateItem(_ updated: ImageItem) {
+        if let idx = imageItems.firstIndex(where: { $0.id == updated.id }) {
+            imageItems[idx] = updated
         }
     }
 
@@ -318,21 +339,33 @@ struct ContentView: View {
 
     private func handleDelete(_ item: ImageItem) {
         if case .uploaded = item.status {
-            itemToDelete = item; showDeleteConfirm = true
+            itemsToDelete = [item]; showDeleteConfirm = true
         } else {
             removeFromList(item)
         }
     }
     private func removeFromList(_ item: ImageItem) {
+        guard let idx = imageItems.firstIndex(where: { $0.id == item.id }) else { return }
         selectedItemIDs.remove(item.id)
-        imageItems.removeAll { $0.id == item.id }
-        // Clean up cached file
+        previewItemID = nil
+        imageItems.remove(at: idx)
+        // Auto-select next
+        if !imageItems.isEmpty {
+            let next = idx < imageItems.count ? imageItems[idx] : imageItems[imageItems.count - 1]
+            selectedItemIDs = [next.id]
+        }
         let cacheURL = ImageProcessor.cacheURL(for: item.title)
         try? FileManager.default.removeItem(at: cacheURL)
     }
     private func deleteSelected() {
-        let items = imageItems.filter { selectedItemIDs.contains($0.id) }
-        for item in items { handleDelete(item) }
+        let selected = imageItems.filter { selectedItemIDs.contains($0.id) }
+        let (uploaded, local) = selected.reduce(into: ([ImageItem](), [ImageItem]())) { acc, item in
+            if case .uploaded = item.status { acc.0.append(item) } else { acc.1.append(item) }
+        }
+        for item in local { removeFromList(item) }
+        if !uploaded.isEmpty {
+            itemsToDelete = uploaded; showDeleteConfirm = true
+        }
     }
     private func deleteFromR2(_ item: ImageItem) {
         if let idx = imageItems.firstIndex(where: { $0.id == item.id }) { imageItems[idx].status = .processing }
@@ -347,8 +380,15 @@ struct ContentView: View {
             }
         }
     }
+    private func uploadSelected() {
+        uploadItems(selectedUploadable)
+    }
+
     private func uploadAll() {
-        let toUpload = readyItems
+        uploadItems(readyItems)
+    }
+
+    private func uploadItems(_ toUpload: [ImageItem]) {
         guard !toUpload.isEmpty else { return }
         isUploading = true
         Task {
@@ -403,8 +443,9 @@ struct ContentView: View {
                 var firstID: UUID?
                 for url in validURLs {
                     let item = ImageItem(originalURL: url)
-                    imageItems.insert(item, at: 0)
-                    newIDs.insert(item.id)
+                    var newItem = item; newItem.category = r2Config.defaultCategory
+                    imageItems.insert(newItem, at: 0)
+                    newIDs.insert(newItem.id)
                     if firstID == nil { firstID = item.id }
                 }
                 selectedItemIDs = newIDs
@@ -425,7 +466,9 @@ struct ContentView: View {
                             onStep: { step in DispatchQueue.main.async { currentStep = step ?? "" } }
                         )
                         var updated = processed
-                        updated.id = imageItems[idx].id  // preserve original ID
+                        updated.id = imageItems[idx].id
+                        updated.category = imageItems[idx].category
+                        updated.originalFilename = imageItems[idx].originalFilename
                         imageItems[idx] = updated
                     } catch {
                         imageItems[idx].status = .error(error.localizedDescription)
@@ -480,11 +523,10 @@ struct SidebarRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.displayName)
                         .font(.system(.callout, design: .rounded))
-                        .foregroundStyle(isSelected ? Color.white : Color.primary)
                         .lineLimit(1).truncationMode(.middle)
                     Text("Processing...")
                         .font(.caption2)
-                        .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
+                        .foregroundStyle(.secondary)
                     Text(" ")
                         .font(.caption2)
                 }
@@ -492,11 +534,10 @@ struct SidebarRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.displayName)
                         .font(.system(.callout, design: .rounded))
-                        .foregroundStyle(isSelected ? Color.white : Color.primary)
                         .lineLimit(1).truncationMode(.middle)
                     Text("Uploading...")
                         .font(.caption2)
-                        .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
+                        .foregroundStyle(.secondary)
                     Text(" ")
                         .font(.caption2)
                 }
@@ -504,40 +545,39 @@ struct SidebarRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.displayName)
                         .font(.system(.callout, design: .rounded))
-                        .foregroundStyle(isSelected ? Color.white : Color.primary)
                         .lineLimit(1).truncationMode(.middle)
 
-                    Text(cat.isEmpty ? "Set a category" : "Type: \(cat)")
+                    Text("Type: \(cat)")
                         .font(.caption2)
-                        .foregroundStyle(cat.isEmpty
-                            ? (isSelected ? Color.white.opacity(0.7) : Color.orange)
-                            : (isSelected ? Color.white.opacity(0.7) : Color.secondary))
+                        .foregroundStyle(.secondary)
 
                     HStack {
                         Text(formattedDate).font(.caption2)
-                            .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         if item.webpSize > 0 {
                             Text(item.formattedWebPSize).font(.caption2)
-                                .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
 
                     if case .uploaded(let url) = item.status {
                         Text(url).font(.caption2)
-                            .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary).lineLimit(1)
+                            .foregroundStyle(.secondary).lineLimit(1)
                     }
                     if case .error(let msg) = item.status {
                         Text(msg).font(.caption2)
-                            .foregroundStyle(isSelected ? Color.white : Color.red).lineLimit(1)
+                            .foregroundStyle(.red).lineLimit(1)
                     }
                 }
             }
         }
         .padding(.vertical, 3)
         .contextMenu {
-            if case .ready = item.status, !cat.isEmpty {
-                Button(action: uploadSingle) { Label("Upload as \(cat)", systemImage: "icloud.and.arrow.up") }
+            if case .ready = item.status {
+                Button(action: uploadSingle) {
+                    Label("Upload as \(cat)", systemImage: "icloud.and.arrow.up")
+                }
             }
             if case .ready = item.status {
                 Button(action: copyPredictedURL) { Label("Export URL", systemImage: "link") }
@@ -563,21 +603,20 @@ struct SidebarRow: View {
     private var statusIcon: some View {
         switch item.status {
         case .processing, .uploading:
-            ProgressView().scaleEffect(0.45).frame(width: 8, height: 8)
-                .tint(isSelected ? .white : .accentColor)
+            ProgressView().scaleEffect(0.45).frame(width: 10, height: 10)
         case .ready:
-            Circle().stroke(isSelected ? Color.white.opacity(0.5) : Color.secondary.opacity(0.3), lineWidth: 1.5)
-                .frame(width: 8, height: 8)
+            Circle()
+                .stroke(.secondary.opacity(0.35), lineWidth: 1.5)
+                .frame(width: 10, height: 10)
         case .uploaded:
-            Circle().fill(isSelected ? Color.green : Color.green).frame(width: 8, height: 8)
+            Circle().fill(.green).frame(width: 10, height: 10)
         case .error:
-            Circle().fill(isSelected ? Color.red : Color.red).frame(width: 8, height: 8)
+            Circle().fill(.red).frame(width: 10, height: 10)
         }
     }
 
     private func uploadSingle() {
-        guard !cat.isEmpty else { return }
-        var updated = item; updated.category = cat; updated.status = .uploading; onUpdate(updated)
+        var updated = item; updated.status = .uploading; onUpdate(updated)
         Task {
             do {
                 let result = try await uploader.upload(item: updated, config: config)
