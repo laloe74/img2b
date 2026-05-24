@@ -43,7 +43,11 @@ codesign --force --deep --sign - \
     --entitlements "$PROJECT_DIR/Resources/img2b.entitlements" \
     "$APP_BUNDLE" 2>&1
 
+# Copy to desktop
+rm -rf "$DESKTOP"
+cp -R "$APP_BUNDLE" "$DESKTOP"
+
 echo
 echo "=== Done ==="
 echo "App built: $APP_BUNDLE"
-echo "Run: open $APP_BUNDLE"
+echo "Desktop: $DESKTOP"

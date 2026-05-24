@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -17,6 +18,7 @@ struct ContentView: View {
     @State private var showDeleteConfirm = false
     @State private var itemToDelete: ImageItem?
     @State private var selectedItemIDs: Set<UUID> = []
+    @State private var showCategoryModal = false
 
     private var selectedItem: ImageItem? {
         guard let id = selectedItemIDs.first else { return nil }
@@ -57,6 +59,7 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
+            .onSidebarEmptyClick(selectedItemIDs: $selectedItemIDs)
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
             VStack {
@@ -80,6 +83,21 @@ struct ContentView: View {
             }
         }
         .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                if !selectedItemIDs.isEmpty {
+                    Button(action: deleteSelected) {
+                        Image(systemName: "trash")
+                    }
+                    .help("Delete (\(selectedItemIDs.count))")
+                    .tint(.red)
+                    if !uploadedOnly.isEmpty {
+                        Button(action: copyAll) {
+                            Image(systemName: "doc.on.clipboard")
+                        }
+                        .help("Copy TOML (\(uploadedOnly.count))")
+                    }
+                }
+            }
             if !imageItems.isEmpty, r2Config.categories.count > 1 {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 4) {
@@ -99,6 +117,17 @@ struct ContentView: View {
                             .foregroundStyle(isSelected(cat) ? .white : .secondary)
                             .help(cat)
                         }
+                        Button {
+                            showCategoryModal = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .buttonStyle(.borderless)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(.clear))
+                        .foregroundStyle(.secondary)
+                        .help("New category")
                     }
                     .padding(4)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -118,31 +147,19 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(config: $r2Config)
         }
-        .safeAreaInset(edge: .bottom) {
-            if !selectedItemIDs.isEmpty {
-                HStack(spacing: 12) {
-                    Button(action: deleteSelected) {
-                        Label("Delete (\(selectedItemIDs.count))", systemImage: "trash")
-                    }
-                    .buttonStyle(.bordered).controlSize(.small)
-                    if !uploadedOnly.isEmpty {
-                        Button(action: copyAll) {
-                            Label("Copy TOML (\(uploadedOnly.count))", systemImage: "doc.on.clipboard")
-                        }
-                        .buttonStyle(.bordered).controlSize(.small)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 20).padding(.vertical, 12)
-            }
-        }
         .confirmationDialog("Delete from R2?", isPresented: $showDeleteConfirm, presenting: itemToDelete) { item in
             Button("Delete from R2", role: .destructive) { deleteFromR2(item) }
             Button("Remove from List Only") { removeFromList(item) }
             Button("Cancel", role: .cancel) {}
         } message: { item in
-            Text("\"\(item.title).heic\" will be permanently deleted from R2 storage.")
+            Text("\"\(item.title).avif\" will be permanently deleted from R2 storage.")
         }
+        .categoryModal(
+            isPresented: $showCategoryModal,
+            categories: $r2Config.categories,
+            defaultCategory: $r2Config.defaultCategory,
+            onSave: { r2Config.save() }
+        )
         .onExitCommand { selectedItemIDs = [] }
         .onAppear { Task { await updater.checkForUpdates() } }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
@@ -181,29 +198,87 @@ struct ContentView: View {
 
             Divider()
 
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title + ".heic").font(.caption).fontWeight(.medium)
-                    HStack(spacing: 12) {
-                        Text("Original: \(item.formattedOriginalSize)").font(.caption2).foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.title + ".avif").font(.caption).fontWeight(.medium)
+                            .padding(.bottom, 4)
                         if item.webpSize > 0 {
-                            Text("WebP: \(item.formattedWebPSize)").font(.caption2).foregroundStyle(.secondary)
                             Text("\(Int((1 - item.compressionRatio) * 100))% smaller")
                                 .font(.caption2).foregroundStyle(.green)
+                                .fontDesign(.monospaced)
+                        }
+                        previewRow(label: "Original", format: originalFormat, size: item.formattedOriginalSize,
+                                   url: item.originalURL)
+                        if item.webpSize > 0 {
+                            previewRow(label: "Now", format: "AVIF", size: item.formattedWebPSize,
+                                       url: item.webpURL)
                         }
                     }
+                    Spacer()
+                    Button { selectedItemIDs = [] } label: {
+                        Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                Spacer()
-                Button { selectedItemIDs = [] } label: {
-                    Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
         }
     }
 
     // MARK: - Helpers
+
+    private func propertiesFor(url: URL?) -> [CFString: Any]? {
+        guard let url,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        else { return nil }
+        return props
+    }
+
+    private func resolutionFor(url: URL?) -> String? {
+        guard let props = propertiesFor(url: url),
+              let w = props[kCGImagePropertyPixelWidth] as? Int,
+              let h = props[kCGImagePropertyPixelHeight] as? Int
+        else { return nil }
+        return "\(w)\u{2009}\u{00d7}\u{2009}\(h)"
+    }
+
+    private func previewRow(label: String, format: String, size: String, url: URL?) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.caption2).fontWeight(.medium).foregroundStyle(.secondary)
+                .frame(width: 56, alignment: .leading)
+            Text(format)
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .leading)
+                .fontDesign(.monospaced)
+            Text(size)
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .trailing)
+                .fontDesign(.monospaced)
+            Text(resolutionFor(url: url) ?? "-")
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(width: 88, alignment: .trailing)
+                .fontDesign(.monospaced)
+            Text(colorSpaceFor(url: url) ?? "-")
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(width: 160, alignment: .leading)
+                .lineLimit(1)
+        }
+    }
+
+    private var originalFormat: String {
+        selectedItem?.originalURL?.pathExtension.uppercased()
+            ?? selectedItem?.originalFilename.components(separatedBy: ".").last?.uppercased()
+            ?? "-"
+    }
+
+    private func colorSpaceFor(url: URL?) -> String? {
+        guard let props = propertiesFor(url: url) else { return nil }
+        if let profile = props[kCGImagePropertyProfileName] as? String { return profile }
+        return props[kCGImagePropertyColorModel] as? String
+    }
 
     private var readyItems: [ImageItem] {
         imageItems.filter { if case .ready = $0.status { !$0.category.isEmpty } else { false } }
@@ -282,7 +357,7 @@ struct ContentView: View {
         }
     }
     private func copyAll() {
-        clipboard.copyToClipboard(clipboard.generateTOML(for: imageItems))
+        clipboard.copyToClipboard(clipboard.generateTOML(for: imageItems, config: r2Config))
     }
 
     private func handleDetailDrop(providers: [NSItemProvider]) {
@@ -361,15 +436,25 @@ struct SidebarRow: View {
                 .padding(.top, 5)
 
             if case .processing = item.status {
-                VStack(alignment: .leading, spacing: 4) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.secondary.opacity(0.15)).frame(width: 120, height: 12)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.secondary.opacity(0.1)).frame(width: 60, height: 8)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.secondary.opacity(0.08)).frame(width: 90, height: 8)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.displayName)
+                        .font(.system(.callout, design: .rounded))
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .lineLimit(1).truncationMode(.middle)
+                    Text("Processing...")
+                        .font(.caption2)
+                        .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
                 }
-                .modifier(ShimmerModifier(isSelected: isSelected))
+            } else if case .uploading = item.status {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.displayName)
+                        .font(.system(.callout, design: .rounded))
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .lineLimit(1).truncationMode(.middle)
+                    Text("Uploading...")
+                        .font(.caption2)
+                        .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
+                }
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.displayName)
@@ -459,25 +544,41 @@ struct SidebarRow: View {
             }
         }
     }
-    private func copyOne() { clipboard.copyToClipboard(clipboard.generateTOML(for: item)) }
+    private func copyOne() { clipboard.copyToClipboard(clipboard.generateTOML(for: item, config: config)) }
     private func copyURL() {
         if case .uploaded(let url) = item.status { clipboard.copyToClipboard(url) }
     }
     private func copyPredictedURL() {
-        clipboard.copyToClipboard("\(config.publicURLBaseNormalized)/\(item.title).heic")
+        clipboard.copyToClipboard("\(config.publicURLBaseNormalized)/\(item.title).avif")
     }
     private func copyPredictedTOML() {
         let ds = item.dateString
         var d = ds
         if ds.count == 8 { d = "\(ds.prefix(4))-\(ds.dropFirst(4).prefix(2))-\(ds.suffix(2))" }
-        clipboard.copyToClipboard("""
-            [[items]]
-            category = "\(cat)"
-            date = \(d)
-            title = "\(item.title)"
-            url = "\(config.publicURLBaseNormalized)/\(item.title).heic"
+        let predictedURL = "\(config.publicURLBaseNormalized)/\(item.title).avif"
 
-            """)
+        if !config.tomlTemplate.isEmpty {
+            let result = config.tomlTemplate
+                .replacingOccurrences(of: "{category}", with: cat)
+                .replacingOccurrences(of: "{date}", with: d)
+                .replacingOccurrences(of: "{date8}", with: item.dateString)
+                .replacingOccurrences(of: "{title}", with: item.title)
+                .replacingOccurrences(of: "{url}", with: predictedURL)
+                .replacingOccurrences(of: "{width}", with: String(item.width))
+                .replacingOccurrences(of: "{height}", with: String(item.height))
+            clipboard.copyToClipboard(result)
+        } else {
+            clipboard.copyToClipboard("""
+                [[items]]
+                category = "\(cat)"
+                date = \(d)
+                title = "\(item.title)"
+                url = "\(predictedURL)"
+                width = \(item.width)
+                height = \(item.height)
+
+                """)
+        }
     }
 }
 

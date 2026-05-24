@@ -89,7 +89,7 @@ struct SettingsView: View {
                         .frame(minHeight: 100)
                         .disableAutocorrection(true)
                 } header: { Text("TOML Template") } footer: {
-                    Text("{category} {date} {date8} {title} {url}")
+                    Text("{category} {date} {date8} {title} {url} {width} {height}")
                 }
 
                 Section {

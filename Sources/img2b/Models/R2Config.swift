@@ -17,6 +17,8 @@ struct R2Config: Codable, Equatable {
         date = {date}
         title = "{title}"
         url = "{url}"
+        width = {width}
+        height = {height}
         """
     var categories: [String] = ["design", "photography", "physics", "typography"]
     var defaultCategory: String = "design"

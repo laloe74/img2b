@@ -34,7 +34,7 @@ struct ImageProcessor: Sendable {
         item.title = formatName(pattern: namePattern, hash16: item.hash16, hash: hashString, date: item.dateString)
 
         let tempDir = FileManager.default.temporaryDirectory
-        let outputURL = tempDir.appendingPathComponent("\(item.title).heic")
+        let outputURL = tempDir.appendingPathComponent("\(item.title).avif")
 
         let maxBytes = maxSizeKB * 1024
 
@@ -56,7 +56,7 @@ struct ImageProcessor: Sendable {
         onStep?("Converting (Q\(q))...")
         var encoded = try encode(data: workingData, quality: q, lossless: lossless)
 
-        // Step 2: step down quality to hit target (85, then 75 minimum)
+        // Step 2: step down quality to hit target, floor at Q75
         if !lossless, encoded.count > maxBytes {
             for q2 in [85, 75] where encoded.count > maxBytes {
                 onStep?("Recompressing (Q\(q2))...")
@@ -64,13 +64,38 @@ struct ImageProcessor: Sendable {
             }
         }
 
-        // Step 3: resize to 2048px at Q80 — quality floor
+        // Step 3: gradual resize, keep Q75 quality floor
+        var didResize = false
         if !lossless, encoded.count > maxBytes {
-            onStep?("Resizing to 2048px...")
-            encoded = try encodeResized(data: workingData, maxDimension: 2048, quality: 80)
+            didResize = true
+            for dim in [3200, 2560, 2048] where encoded.count > maxBytes {
+                onStep?("Resizing to \(dim)px...")
+                encoded = try encodeResized(data: workingData, maxDimension: dim, quality: 75)
+            }
+        }
+
+        // Step 4: if at original resolution and way under target, improve quality
+        if !lossless, !didResize, encoded.count < maxBytes / 3 {
+            for qUp in [80, 85, 90] {
+                let candidate = try encode(data: workingData, quality: qUp, lossless: false)
+                if candidate.count <= maxBytes {
+                    encoded = candidate
+                } else {
+                    break
+                }
+            }
         }
 
         try encoded.write(to: outputURL)
+
+        // Read compressed dimensions
+        if let source = CGImageSourceCreateWithData(encoded as CFData, nil),
+           let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let w = props[kCGImagePropertyPixelWidth] as? Int,
+           let h = props[kCGImagePropertyPixelHeight] as? Int {
+            item.width = w
+            item.height = h
+        }
 
         onStep?(nil)
 
@@ -81,21 +106,14 @@ struct ImageProcessor: Sendable {
         return finalItem
     }
 
-    // MARK: - Native AVIF encoding
+    // MARK: - Native AVIF encoding (HEIC fallback)
 
     private func encode(data: Data, quality: Int, lossless: Bool) throws -> Data {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { throw Error.loadFailed("\(data.count) bytes, type unknown") }
 
-        let output = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(output, "public.heic" as CFString, 1, nil)
-        else { throw Error.encodeFailed("HEIC encoder unavailable") }
-
-        CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
-
-        guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed("finalize failed, \(cgImage.width)x\(cgImage.height)") }
-        return output as Data
+        return try encodeCGImage(cgImage, quality: quality)
     }
 
     private func resizeToPNG(data: Data, maxDimension: Int) throws -> Data {
@@ -148,14 +166,49 @@ struct ImageProcessor: Sendable {
 
         guard let resized = ctx.makeImage() else { throw Error.encodeFailed("makeImage failed") }
 
-        let output = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(output, "public.heic" as CFString, 1, nil)
+        return try encodeCGImage(resized, quality: quality)
+    }
+
+    /// Try AVIF first (native, then sRGB-normalized), fall back to HEIC
+    private func encodeCGImage(_ cgImage: CGImage, quality: Int) throws -> Data {
+        let q = CGFloat(quality) / 100.0
+
+        // Attempt 1: AVIF with original pixel data
+        if let data = tryEncodeAVIF(cgImage, quality: q) { return data }
+
+        // Attempt 2: AVIF with sRGB-normalized image (some sources fail due to exotic color space)
+        if let normalized = convertToSRGB(cgImage),
+           let data = tryEncodeAVIF(normalized, quality: q) { return data }
+
+        // Fallback: HEIC with original pixel data
+        let heicData = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(heicData, "public.heic" as CFString, 1, nil)
         else { throw Error.encodeFailed("HEIC encoder unavailable") }
 
-        CGImageDestinationAddImage(dest, resized, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
+        CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: q] as CFDictionary)
 
-        guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed("resize finalize failed") }
-        return output as Data
+        guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed("encode failed, \(cgImage.width)x\(cgImage.height)") }
+        return heicData as Data
+    }
+
+    private func tryEncodeAVIF(_ image: CGImage, quality: CGFloat) -> Data? {
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, "public.avif" as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+        return CGImageDestinationFinalize(dest) ? (data as Data) : nil
+    }
+
+    private func convertToSRGB(_ cgImage: CGImage) -> CGImage? {
+        let w = cgImage.width, h = cgImage.height
+        guard let ctx = CGContext(
+            data: nil, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
     }
 
     // MARK: - Helpers

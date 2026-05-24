@@ -7,6 +7,8 @@ struct ImageItem: Identifiable, Hashable, Codable {
     var dateString: String = ""
     var fileSize: Int64 = 0
     var webpSize: Int64 = 0
+    var width: Int = 0
+    var height: Int = 0
     var category: String = ""
     var status: Status = .processing
     var originalFilename: String = ""
@@ -22,7 +24,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, hash16, title, dateString, fileSize, webpSize, category, status, originalFilename
+        case id, hash16, title, dateString, fileSize, webpSize, width, height, category, status, originalFilename
     }
 
     enum Status: Hashable, Codable {
@@ -59,7 +61,9 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     var displayName: String {
-        originalFilename.isEmpty ? (title + ".heic") : originalFilename
+        // Before compression: show original filename. After: show generated title.
+        if !title.isEmpty { return title + ".avif" }
+        return originalFilename
     }
 
     var formattedOriginalSize: String {
