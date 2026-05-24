@@ -326,10 +326,17 @@ struct SidebarRow: View {
                 .modifier(ShimmerModifier(isSelected: isSelected))
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title + ".avif")
-                        .font(.system(.callout, design: .rounded))
-                        .foregroundStyle(isSelected ? Color.white : Color.primary)
-                        .lineLimit(1).truncationMode(.middle)
+                    if case .error = item.status {
+                        Text(item.displayName)
+                            .font(.system(.callout, design: .rounded))
+                            .foregroundStyle(isSelected ? Color.white : Color.primary)
+                            .lineLimit(1).truncationMode(.middle)
+                    } else {
+                        Text(item.title + ".avif")
+                            .font(.system(.callout, design: .rounded))
+                            .foregroundStyle(isSelected ? Color.white : Color.primary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
 
                     Text(cat.isEmpty ? "Set a category" : "Type: \(cat)")
                         .font(.caption2)

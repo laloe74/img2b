@@ -77,53 +77,49 @@ struct ImageProcessor: Sendable {
     // MARK: - Native AVIF encoding
 
     private func encode(data: Data, quality: Int, lossless: Bool) async throws -> Data {
-        try await Task.detached {
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
-            else { throw Error.loadFailed }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { throw Error.loadFailed }
 
-            let output = NSMutableData()
-            guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
-            else { throw Error.encodeFailed }
+        let output = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
+        else { throw Error.encodeFailed }
 
-            CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
+        CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
 
-            guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
-            return output as Data
-        }.value
+        guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
+        return output as Data
     }
 
     private func encodeResized(data: Data, maxDimension: Int, quality: Int) async throws -> Data {
-        try await Task.detached {
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
-            else { throw Error.loadFailed }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { throw Error.loadFailed }
 
-            let w = CGFloat(cgImage.width)
-            let h = CGFloat(cgImage.height)
-            let scale = min(CGFloat(maxDimension) / max(w, h), 1.0)
+        let w = CGFloat(cgImage.width)
+        let h = CGFloat(cgImage.height)
+        let scale = min(CGFloat(maxDimension) / max(w, h), 1.0)
 
-            guard let ctx = CGContext(
-                data: nil, width: Int(w * scale), height: Int(h * scale),
-                bitsPerComponent: 8, bytesPerRow: 0,
-                space: cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
-                bitmapInfo: cgImage.bitmapInfo.rawValue
-            ) else { throw Error.encodeFailed }
+        guard let ctx = CGContext(
+            data: nil, width: Int(w * scale), height: Int(h * scale),
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: cgImage.bitmapInfo.rawValue
+        ) else { throw Error.encodeFailed }
 
-            ctx.interpolationQuality = .high
-            ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: Int(w * scale), height: Int(h * scale)))
+        ctx.interpolationQuality = .high
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: Int(w * scale), height: Int(h * scale)))
 
-            guard let resized = ctx.makeImage() else { throw Error.encodeFailed }
+        guard let resized = ctx.makeImage() else { throw Error.encodeFailed }
 
-            let output = NSMutableData()
-            guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
-            else { throw Error.encodeFailed }
+        let output = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
+        else { throw Error.encodeFailed }
 
-            CGImageDestinationAddImage(dest, resized, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
+        CGImageDestinationAddImage(dest, resized, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
 
-            guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
-            return output as Data
-        }.value
+        guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
+        return output as Data
     }
 
     // MARK: - Helpers
