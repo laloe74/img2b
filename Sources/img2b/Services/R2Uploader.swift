@@ -17,10 +17,10 @@ struct R2Uploader: Sendable {
     }
 
     func upload(item: ImageItem, config: R2Config) async throws -> ImageItem {
-        guard config.isValid, let webpURL = item.webpURL else { throw Error.invalidConfig }
-        guard let data = try? Data(contentsOf: webpURL) else { throw Error.networkError("Could not read WebP file") }
+        guard config.isValid, let webpURL = item.heicURL else { throw Error.invalidConfig }
+        guard let data = try? Data(contentsOf: webpURL) else { throw Error.networkError("Could not read HEIC file") }
 
-        let key = "\(item.title).webp"
+        let key = "\(item.title).heic"
         let payloadHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 
         let now = Date()
@@ -32,7 +32,7 @@ struct R2Uploader: Sendable {
         let canonicalURI = "/\(key)"
 
         let canonicalHeaders = [
-            "content-type:image/avif",
+            "content-type:image/heic",
             "host:\(host)",
             "x-amz-content-sha256:\(payloadHash)",
             "x-amz-date:\(amzDate)",
@@ -55,7 +55,7 @@ struct R2Uploader: Sendable {
 
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "PUT"
-        request.setValue("image/avif", forHTTPHeaderField: "Content-Type")
+        request.setValue("image/heic", forHTTPHeaderField: "Content-Type")
         request.setValue(amzDate, forHTTPHeaderField: "x-amz-date")
         request.setValue(payloadHash, forHTTPHeaderField: "x-amz-content-sha256")
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
@@ -76,7 +76,7 @@ struct R2Uploader: Sendable {
     func delete(item: ImageItem, config: R2Config) async throws {
         guard config.isValid else { throw Error.invalidConfig }
 
-        let key = "\(item.title).webp"
+        let key = "\(item.title).heic"
         let emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
         let now = Date()

@@ -34,7 +34,7 @@ struct ImageProcessor: Sendable {
         item.title = formatName(pattern: namePattern, hash16: item.hash16, hash: hashString, date: item.dateString)
 
         let tempDir = FileManager.default.temporaryDirectory
-        let outputURL = tempDir.appendingPathComponent("\(item.title).avif")
+        let outputURL = tempDir.appendingPathComponent("\(item.title).heic")
 
         let maxBytes = maxSizeKB * 1024
 
@@ -95,8 +95,8 @@ struct ImageProcessor: Sendable {
         else { throw Error.loadFailed("\(data.count) bytes, type unknown") }
 
         let output = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
-        else { throw Error.encodeFailed("AVIF encoder unavailable") }
+        guard let dest = CGImageDestinationCreateWithData(output, "public.heic" as CFString, 1, nil)
+        else { throw Error.encodeFailed("HEIC encoder unavailable") }
 
         CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
 
@@ -126,8 +126,8 @@ struct ImageProcessor: Sendable {
         guard let resized = ctx.makeImage() else { throw Error.encodeFailed("makeImage failed") }
 
         let output = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
-        else { throw Error.encodeFailed("AVIF encoder unavailable") }
+        guard let dest = CGImageDestinationCreateWithData(output, "public.heic" as CFString, 1, nil)
+        else { throw Error.encodeFailed("HEIC encoder unavailable") }
 
         CGImageDestinationAddImage(dest, resized, [kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0] as CFDictionary)
 
