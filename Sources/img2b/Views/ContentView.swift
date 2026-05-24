@@ -73,8 +73,6 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .onTapGesture { selectedItemIDs = [] }
         }
         .toolbar {
             if !imageItems.isEmpty, r2Config.categories.count > 1 {
