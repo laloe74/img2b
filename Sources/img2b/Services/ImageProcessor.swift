@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import ImageIO
+
 struct ImageProcessor: Sendable {
     enum Error: Swift.Error, LocalizedError {
         case loadFailed
@@ -35,21 +36,22 @@ struct ImageProcessor: Sendable {
         let tempDir = FileManager.default.temporaryDirectory
         let outputURL = tempDir.appendingPathComponent("\(item.title).avif")
 
-        // Step 1: encode at requested quality
-        onStep?("Converting (Q\(quality))...")
+        // Step 1
         let q = min(100, max(1, quality))
-        var encoded = try await encodeAVIF(from: url, quality: q, lossless: lossless, effort: 4)
+        onStep?("Converting (Q\(q))...")
+        var encoded = try await encode(data: data, quality: q, lossless: lossless)
 
-        // Step 2: retry with max effort
+        // Step 2: retry with higher compression
         if !lossless, encoded.count > maxSizeKB * 1024 {
-            onStep?("Recompressing (max effort)...")
-            encoded = try await encodeAVIF(from: url, quality: q, lossless: false, effort: 9)
+            onStep?("Recompressing...")
+            let q2 = max(50, q - 20)
+            encoded = try await encode(data: data, quality: q2, lossless: false)
         }
 
-        // Step 3: resize then encode
+        // Step 3: resize
         if !lossless, encoded.count > maxSizeKB * 1024 {
-            onStep?("Resizing to 1920px...")
-            encoded = try await encodeResizedAVIF(from: url, maxDimension: 1920, quality: q)
+            onStep?("Resizing...")
+            encoded = try await encodeResized(data: data, maxDimension: 1920, quality: q)
         }
 
         try encoded.write(to: outputURL)
@@ -65,61 +67,57 @@ struct ImageProcessor: Sendable {
 
     // MARK: - Native AVIF encoding
 
-    private func encodeAVIF(from url: URL, quality: Int, lossless: Bool, effort: Int) async throws -> Data {
+    private func encode(data: Data, quality: Int, lossless: Bool) async throws -> Data {
         try await Task.detached {
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
                   let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
             else { throw Error.loadFailed }
 
-            let data = NSMutableData()
-            guard let dest = CGImageDestinationCreateWithData(data, "public.avif" as CFString, 1, nil)
+            let output = NSMutableData()
+            guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
             else { throw Error.encodeFailed }
 
-            let options: [CFString: Any] = [
-                kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0,
-                ]
+            let q = CGFloat(quality) / 100.0
+            CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: q] as CFDictionary)
 
-            CGImageDestinationAddImage(dest, cgImage, options as CFDictionary)
             guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
-            return data as Data
+            return output as Data
         }.value
     }
 
-    private func encodeResizedAVIF(from url: URL, maxDimension: Int, quality: Int) async throws -> Data {
+    private func encodeResized(data: Data, maxDimension: Int, quality: Int) async throws -> Data {
         try await Task.detached {
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
                   let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
             else { throw Error.loadFailed }
 
-            let origW = CGFloat(cgImage.width)
-            let origH = CGFloat(cgImage.height)
-            let scale = min(CGFloat(maxDimension) / max(origW, origH), 1.0)
-            let newW = Int(origW * scale)
-            let newH = Int(origH * scale)
+            let w = CGFloat(cgImage.width)
+            let h = CGFloat(cgImage.height)
+            let scale = min(CGFloat(maxDimension) / max(w, h), 1.0)
+            let nw = Int(w * scale)
+            let nh = Int(h * scale)
 
-            // Resize using CGContext
-            let ctx = CGContext(
-                data: nil, width: newW, height: newH,
+            guard let ctx = CGContext(
+                data: nil, width: nw, height: nh,
                 bitsPerComponent: 8, bytesPerRow: 0,
-                space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            )!
+                space: cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: cgImage.bitmapInfo.rawValue
+            ) else { throw Error.encodeFailed }
+
             ctx.interpolationQuality = .high
-            ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: newW, height: newH))
+            ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: nw, height: nh))
 
             guard let resized = ctx.makeImage() else { throw Error.encodeFailed }
 
-            let data = NSMutableData()
-            guard let dest = CGImageDestinationCreateWithData(data, "public.avif" as CFString, 1, nil)
+            let output = NSMutableData()
+            guard let dest = CGImageDestinationCreateWithData(output, "public.avif" as CFString, 1, nil)
             else { throw Error.encodeFailed }
 
-            let options: [CFString: Any] = [
-                kCGImageDestinationLossyCompressionQuality: CGFloat(quality) / 100.0,
-                ]
+            let q = CGFloat(quality) / 100.0
+            CGImageDestinationAddImage(dest, resized, [kCGImageDestinationLossyCompressionQuality: q] as CFDictionary)
 
-            CGImageDestinationAddImage(dest, resized, options as CFDictionary)
             guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed }
-            return data as Data
+            return output as Data
         }.value
     }
 
