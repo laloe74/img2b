@@ -8,6 +8,7 @@ struct DropZoneView: View {
     @Binding var processingProgress: (current: Int, total: Int)
     @Binding var currentStep: String
     let r2Config: R2Config
+    var onNewItems: ((Set<UUID>, UUID?) -> Void)?
 
     @State private var isTargeted = false
 
@@ -96,13 +97,22 @@ struct DropZoneView: View {
             processingProgress = (0, validURLs.count)
 
             Task {
-                for (index, url) in validURLs.enumerated() {
+                // Phase 1: insert all items, highlight them together
+                var newIDs = Set<UUID>()
+                var firstID: UUID?
+                for url in validURLs {
                     let item = ImageItem(originalURL: url)
-                    imageItems.append(item)
+                    imageItems.insert(item, at: 0)
+                    newIDs.insert(item.id)
+                    if firstID == nil { firstID = item.id }
+                }
+                onNewItems?(newIDs, firstID)
 
+                // Phase 2: process each one
+                for (index, url) in validURLs.enumerated() {
+                    guard let idx = imageItems.firstIndex(where: { $0.originalURL == url }) else { continue }
                     let accessing = url.startAccessingSecurityScopedResource()
                     defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
                     do {
                         let processed = try await processor.processImage(
                             at: url,
@@ -112,13 +122,11 @@ struct DropZoneView: View {
                             namePattern: r2Config.namePattern,
                             onStep: { step in DispatchQueue.main.async { currentStep = step ?? "" } }
                         )
-                        if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
-                            imageItems[idx] = processed
-                        }
+                        var updated = processed
+                        updated.id = imageItems[idx].id  // preserve original ID
+                        imageItems[idx] = updated
                     } catch {
-                        if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
-                            imageItems[idx].status = .error(error.localizedDescription)
-                        }
+                        imageItems[idx].status = .error(error.localizedDescription)
                     }
                     processingProgress = (index + 1, validURLs.count)
                 }

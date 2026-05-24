@@ -33,8 +33,8 @@ struct ImageProcessor: Sendable {
         item.dateString = df.string(from: Date())
         item.title = formatName(pattern: namePattern, hash16: item.hash16, hash: hashString, date: item.dateString)
 
-        let tempDir = FileManager.default.temporaryDirectory
-        let outputURL = tempDir.appendingPathComponent("\(item.title).avif")
+        let cacheDir = Self.cacheDirectory()
+        let outputURL = cacheDir.appendingPathComponent("\(item.title).avif")
 
         let maxBytes = maxSizeKB * 1024
 
@@ -212,6 +212,17 @@ struct ImageProcessor: Sendable {
     }
 
     // MARK: - Helpers
+
+    static func cacheURL(for title: String) -> URL {
+        cacheDirectory().appendingPathComponent("\(title).avif")
+    }
+
+    static func cacheDirectory() -> URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("img2b/cache")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
 
     private func formatName(pattern: String, hash16: String, hash: String, date: String) -> String {
         pattern

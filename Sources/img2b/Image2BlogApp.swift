@@ -33,6 +33,7 @@ struct Image2BlogApp: App {
                 .keyboardShortcut(",", modifiers: .command)
             }
         }
+        .windowToolbarStyle(.unified)
         .defaultSize(width: 960, height: 680)
     }
 }

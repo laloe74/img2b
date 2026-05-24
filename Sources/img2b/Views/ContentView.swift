@@ -18,10 +18,12 @@ struct ContentView: View {
     @State private var showDeleteConfirm = false
     @State private var itemToDelete: ImageItem?
     @State private var selectedItemIDs: Set<UUID> = []
+    @State private var previewItemID: UUID?
     @State private var showCategoryModal = false
 
     private var selectedItem: ImageItem? {
-        guard let id = selectedItemIDs.first else { return nil }
+        let id = previewItemID ?? selectedItemIDs.first
+        guard let id else { return nil }
         return imageItems.first { $0.id == id }
     }
 
@@ -72,7 +74,12 @@ struct ContentView: View {
                         isProcessing: $isProcessing,
                         processingProgress: $processingProgress,
                         currentStep: $currentStep,
-                        r2Config: r2Config
+                        r2Config: r2Config,
+                        onNewItems: { ids, firstID in
+                            selectedItemIDs = ids
+                            previewItemID = firstID
+                            NSApp.activate(ignoringOtherApps: true)
+                        }
                     )
                 }
             }
@@ -84,18 +91,17 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
-                if !selectedItemIDs.isEmpty {
-                    Button(action: deleteSelected) {
-                        Image(systemName: "trash")
+                Button(action: deleteSelected) {
+                    Image(systemName: "trash")
+                }
+                .disabled(selectedItemIDs.isEmpty)
+                .help("Delete (\(selectedItemIDs.count))")
+                .tint(.red)
+                if !uploadedOnly.isEmpty {
+                    Button(action: copyAll) {
+                        Image(systemName: "doc.on.clipboard")
                     }
-                    .help("Delete (\(selectedItemIDs.count))")
-                    .tint(.red)
-                    if !uploadedOnly.isEmpty {
-                        Button(action: copyAll) {
-                            Image(systemName: "doc.on.clipboard")
-                        }
-                        .help("Copy TOML (\(uploadedOnly.count))")
-                    }
+                    .help("Copy TOML (\(uploadedOnly.count))")
                 }
             }
             if !imageItems.isEmpty, r2Config.categories.count > 1 {
@@ -160,7 +166,12 @@ struct ContentView: View {
             defaultCategory: $r2Config.defaultCategory,
             onSave: { r2Config.save() }
         )
-        .onExitCommand { selectedItemIDs = [] }
+        .navigationTitle("")
+        .onChange(of: selectedItemIDs) { _, newValue in
+            if newValue.count <= 1 { previewItemID = nil }
+        }
+        .onExitCommand { selectedItemIDs = []; previewItemID = nil }
+        .background(WindowSeparatorRemover())
         .onAppear { Task { await updater.checkForUpdates() } }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             showSettings = true
@@ -172,7 +183,8 @@ struct ContentView: View {
     @ViewBuilder
     private func previewView(for item: ImageItem) -> some View {
         VStack(spacing: 0) {
-            if let webpURL = item.webpURL, let nsImage = NSImage(contentsOf: webpURL) {
+            let localURL = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
+            if let nsImage = NSImage(contentsOf: localURL) {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -212,11 +224,11 @@ struct ContentView: View {
                                    url: item.originalURL)
                         if item.webpSize > 0 {
                             previewRow(label: "Now", format: "AVIF", size: item.formattedWebPSize,
-                                       url: item.webpURL)
+                                       url: item.webpURL ?? ImageProcessor.cacheURL(for: item.title))
                         }
                     }
                     Spacer()
-                    Button { selectedItemIDs = [] } label: {
+                    Button { selectedItemIDs = []; previewItemID = nil } label: {
                         Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
@@ -314,6 +326,9 @@ struct ContentView: View {
     private func removeFromList(_ item: ImageItem) {
         selectedItemIDs.remove(item.id)
         imageItems.removeAll { $0.id == item.id }
+        // Clean up cached file
+        let cacheURL = ImageProcessor.cacheURL(for: item.title)
+        try? FileManager.default.removeItem(at: cacheURL)
     }
     private func deleteSelected() {
         let items = imageItems.filter { selectedItemIDs.contains($0.id) }
@@ -383,9 +398,22 @@ struct ContentView: View {
             guard !validURLs.isEmpty else { return }
             isProcessing = true; processingProgress = (0, validURLs.count)
             Task {
-                for (index, url) in validURLs.enumerated() {
+                // Phase 1: insert all items, highlight them together
+                var newIDs = Set<UUID>()
+                var firstID: UUID?
+                for url in validURLs {
                     let item = ImageItem(originalURL: url)
-                    imageItems.append(item)
+                    imageItems.insert(item, at: 0)
+                    newIDs.insert(item.id)
+                    if firstID == nil { firstID = item.id }
+                }
+                selectedItemIDs = newIDs
+                previewItemID = firstID
+                NSApp.activate(ignoringOtherApps: true)
+
+                // Phase 2: process each one
+                for (index, url) in validURLs.enumerated() {
+                    guard let idx = imageItems.firstIndex(where: { $0.originalURL == url }) else { continue }
                     let accessing = url.startAccessingSecurityScopedResource()
                     defer { if accessing { url.stopAccessingSecurityScopedResource() } }
                     do {
@@ -396,13 +424,11 @@ struct ContentView: View {
                             namePattern: r2Config.namePattern,
                             onStep: { step in DispatchQueue.main.async { currentStep = step ?? "" } }
                         )
-                        if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
-                            imageItems[idx] = processed
-                        }
+                        var updated = processed
+                        updated.id = imageItems[idx].id  // preserve original ID
+                        imageItems[idx] = updated
                     } catch {
-                        if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
-                            imageItems[idx].status = .error(error.localizedDescription)
-                        }
+                        imageItems[idx].status = .error(error.localizedDescription)
                     }
                     processingProgress = (index + 1, validURLs.count)
                 }
@@ -410,6 +436,21 @@ struct ContentView: View {
             }
         }
     }
+}
+
+// MARK: - Window Separator
+
+struct WindowSeparatorRemover: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            guard let window = view.window else { return }
+            window.titlebarSeparatorStyle = .none
+            window.titlebarAppearsTransparent = true
+        }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 // MARK: - Sidebar Row
@@ -444,6 +485,8 @@ struct SidebarRow: View {
                     Text("Processing...")
                         .font(.caption2)
                         .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
+                    Text(" ")
+                        .font(.caption2)
                 }
             } else if case .uploading = item.status {
                 VStack(alignment: .leading, spacing: 2) {
@@ -454,6 +497,8 @@ struct SidebarRow: View {
                     Text("Uploading...")
                         .font(.caption2)
                         .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
+                    Text(" ")
+                        .font(.caption2)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 2) {

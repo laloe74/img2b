@@ -1,7 +1,7 @@
 import Foundation
 
 struct ImageItem: Identifiable, Hashable, Codable {
-    let id: UUID
+    var id: UUID
     var hash16: String = ""
     var title: String = ""
     var dateString: String = ""

@@ -17,8 +17,9 @@ struct R2Uploader: Sendable {
     }
 
     func upload(item: ImageItem, config: R2Config) async throws -> ImageItem {
-        guard config.isValid, let webpURL = item.webpURL else { throw Error.invalidConfig }
-        guard let data = try? Data(contentsOf: webpURL) else { throw Error.networkError("Could not read AVIF file") }
+        guard config.isValid else { throw Error.invalidConfig }
+        let fileURL = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
+        guard let data = try? Data(contentsOf: fileURL) else { throw Error.networkError("Could not read AVIF file") }
 
         let key = "\(item.title).avif"
         let payloadHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
