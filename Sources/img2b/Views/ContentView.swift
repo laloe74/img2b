@@ -24,7 +24,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List {
+            List(selection: $selectedItemIDs) {
                 Section {
                     if imageItems.isEmpty {
                         Text("No images yet")
@@ -35,7 +35,6 @@ struct ContentView: View {
                         SidebarRow(
                             item: item,
                             isSelected: selectedItemIDs.contains(item.id),
-                            selectedItemIDs: $selectedItemIDs,
                             config: r2Config,
                             uploader: uploader,
                             clipboard: clipboard,
@@ -46,14 +45,7 @@ struct ContentView: View {
                             },
                             onDelete: { handleDelete(item) }
                         )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if selectedItemIDs.contains(item.id) && selectedItemIDs.count == 1 {
-                                selectedItemIDs = []
-                            } else {
-                                selectedItemIDs = [item.id]
-                            }
-                        }
+                        .tag(item.id)
                     }
                     .onDelete { indexSet in
                         for idx in indexSet { handleDelete(imageItems[idx]) }
@@ -313,34 +305,21 @@ struct ContentView: View {
 struct SidebarRow: View {
     let item: ImageItem
     let isSelected: Bool
-    @Binding var selectedItemIDs: Set<UUID>
     let config: R2Config
     let uploader: R2Uploader
     let clipboard: ClipboardService
     let onUpdate: (ImageItem) -> Void
     let onDelete: () -> Void
 
-    init(item: ImageItem, isSelected: Bool, selectedItemIDs: Binding<Set<UUID>>,
-         config: R2Config, uploader: R2Uploader, clipboard: ClipboardService,
+    init(item: ImageItem, isSelected: Bool, config: R2Config, uploader: R2Uploader, clipboard: ClipboardService,
          onUpdate: @escaping (ImageItem) -> Void, onDelete: @escaping () -> Void) {
         self.item = item; self.isSelected = isSelected
-        self._selectedItemIDs = selectedItemIDs
         self.config = config; self.uploader = uploader
         self.clipboard = clipboard; self.onUpdate = onUpdate; self.onDelete = onDelete
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Toggle("Select", isOn: Binding(
-                get: { selectedItemIDs.contains(item.id) },
-                set: { checked in
-                    if checked { selectedItemIDs.insert(item.id) }
-                    else { selectedItemIDs.remove(item.id) }
-                }
-            ))
-            .toggleStyle(.checkbox)
-            .labelsHidden()
-
             statusIcon
                 .padding(.top, 5)
 
