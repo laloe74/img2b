@@ -17,7 +17,7 @@ struct R2Uploader: Sendable {
     }
 
     func upload(item: ImageItem, config: R2Config) async throws -> ImageItem {
-        guard config.isValid, let webpURL = item.heicURL else { throw Error.invalidConfig }
+        guard config.isValid, let webpURL = item.webpURL else { throw Error.invalidConfig }
         guard let data = try? Data(contentsOf: webpURL) else { throw Error.networkError("Could not read HEIC file") }
 
         let key = "\(item.title).heic"
