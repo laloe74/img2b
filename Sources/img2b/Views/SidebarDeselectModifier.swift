@@ -9,6 +9,10 @@ struct SidebarClickHandler: ViewModifier {
         content
             .onAppear {
                 token = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+                    // Don't interfere with Cmd/Shift+click (multi-select)
+                    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                    if flags.contains(.command) || flags.contains(.shift) { return event }
+
                     guard !selectedItemIDs.isEmpty,
                           let contentView = event.window?.contentView else { return event }
 

@@ -59,18 +59,18 @@ struct ContentView: View {
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
-            VStack {
+            ZStack {
+                DropZoneView(
+                    imageItems: $imageItems,
+                    processor: processor,
+                    isProcessing: $isProcessing,
+                    processingProgress: $processingProgress,
+                    currentStep: $currentStep,
+                    r2Config: r2Config
+                )
+
                 if let item = selectedItem {
                     previewView(for: item)
-                } else {
-                    DropZoneView(
-                        imageItems: $imageItems,
-                        processor: processor,
-                        isProcessing: $isProcessing,
-                        processingProgress: $processingProgress,
-                        currentStep: $currentStep,
-                        r2Config: r2Config
-                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -169,6 +169,7 @@ struct ContentView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
             } else if case .uploaded(let url) = item.status, let imageURL = URL(string: url) {
                 AsyncImage(url: imageURL) { phase in
                     switch phase {
@@ -183,6 +184,7 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
             } else {
                 ContentUnavailableView(
                     "No Preview",
