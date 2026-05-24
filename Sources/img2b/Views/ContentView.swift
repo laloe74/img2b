@@ -139,7 +139,7 @@ struct ContentView: View {
             Button("Remove from List Only") { removeFromList(item) }
             Button("Cancel", role: .cancel) {}
         } message: { item in
-            Text("\"\(item.title).webp\" will be permanently deleted from R2 storage.")
+            Text("\"\(item.title).avif\" will be permanently deleted from R2 storage.")
         }
         .onExitCommand { selectedItemID = nil }
         .onSidebarEmptyClick(selectedItemID: $selectedItemID)
@@ -185,7 +185,7 @@ struct ContentView: View {
 
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title + ".webp").font(.caption).fontWeight(.medium)
+                    Text(item.title + ".avif").font(.caption).fontWeight(.medium)
                     HStack(spacing: 12) {
                         Text("Original: \(item.formattedOriginalSize)").font(.caption2).foregroundStyle(.secondary)
                         if item.webpSize > 0 {
@@ -326,7 +326,7 @@ struct SidebarRow: View {
                 .modifier(ShimmerModifier(isSelected: isSelected))
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title + ".webp")
+                    Text(item.title + ".avif")
                         .font(.system(.callout, design: .rounded))
                         .foregroundStyle(isSelected ? Color.white : Color.primary)
                         .lineLimit(1).truncationMode(.middle)
@@ -438,7 +438,7 @@ struct SidebarRow: View {
         }
     }
     private func copyPredictedURL() {
-        clipboard.copyToClipboard("\(config.publicURLBaseNormalized)/\(item.title).webp")
+        clipboard.copyToClipboard("\(config.publicURLBaseNormalized)/\(item.title).avif")
     }
     private func copyPredictedTOML() {
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
@@ -452,7 +452,7 @@ struct SidebarRow: View {
             category = "\(cat)"
             date = \(dateFormatted)
             title = "\(item.title)"
-            url = "\(config.publicURLBaseNormalized)/\(item.title).webp"
+            url = "\(config.publicURLBaseNormalized)/\(item.title).avif"
 
             """
         clipboard.copyToClipboard(toml)

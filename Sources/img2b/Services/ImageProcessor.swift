@@ -40,7 +40,7 @@ struct ImageProcessor: Sendable {
         item.title = formatName(pattern: namePattern, hash16: item.hash16, hash: hashString, date: item.dateString)
 
         let tempDir = FileManager.default.temporaryDirectory
-        let webpURL = tempDir.appendingPathComponent("\(item.title).webp")
+        let webpURL = tempDir.appendingPathComponent("\(item.title).avif")
 
         // Pre-resize large images to avoid slow compression on huge sources
         var sourceURL = url
@@ -93,8 +93,8 @@ struct ImageProcessor: Sendable {
     private func runVips(input: URL, output: URL, quality: Int, lossless: Bool, effort: Int) async throws {
         let q = min(100, max(1, quality))
         let e = min(6, max(0, effort))
-        var args: [String] = ["webpsave", input.path, output.path, "--Q", "\(q)", "--effort", "\(e)"]
-        if lossless { args.append("--lossless") } else { args.append("--smart-subsample") }
+        var args: [String] = ["heifsave", input.path, output.path, "--compression", "av1", "--Q", "\(q)", "--effort", "\(e)"]
+        if lossless { args.append("--lossless") }
         try await runProcess(args: args)
     }
 

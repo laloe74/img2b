@@ -32,7 +32,7 @@ struct R2Uploader: Sendable {
         let canonicalURI = "/\(key)"
 
         let canonicalHeaders = [
-            "content-type:image/webp",
+            "content-type:image/avif",
             "host:\(host)",
             "x-amz-content-sha256:\(payloadHash)",
             "x-amz-date:\(amzDate)",
@@ -55,7 +55,7 @@ struct R2Uploader: Sendable {
 
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "PUT"
-        request.setValue("image/webp", forHTTPHeaderField: "Content-Type")
+        request.setValue("image/avif", forHTTPHeaderField: "Content-Type")
         request.setValue(amzDate, forHTTPHeaderField: "x-amz-date")
         request.setValue(payloadHash, forHTTPHeaderField: "x-amz-content-sha256")
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
