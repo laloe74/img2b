@@ -158,9 +158,10 @@ struct ContentView: View {
 
                 // Update existing local items that match R2
                 for i in imageItems.indices {
-                    let avifKey = "\(imageItems[i].title).avif"
+                    let ext = imageItems[i].outputFormat.isEmpty ? "avif" : imageItems[i].outputFormat
+                    let localKey = imageItems[i].title.isEmpty ? nil : "\(imageItems[i].title).\(ext)"
                     let origKey = imageItems[i].originalFilename
-                    let matchKey: String? = if r2Keys.contains(avifKey) { avifKey }
+                    let matchKey: String? = if let k = localKey, r2Keys.contains(k) { k }
                         else if !origKey.isEmpty, r2Keys.contains(origKey) { origKey }
                         else { nil }
                     guard let key = matchKey else { continue }
@@ -177,9 +178,13 @@ struct ContentView: View {
                 }
 
                 // Import R2 objects not already in local list
-                var localKeys = Set(imageItems.map { "\($0.title).avif" })
-                for item in imageItems where !item.originalFilename.isEmpty {
-                    localKeys.insert(item.originalFilename)
+                var localKeys: Set<String> = []
+                for item in imageItems {
+                    if !item.originalFilename.isEmpty { localKeys.insert(item.originalFilename) }
+                    if !item.title.isEmpty {
+                        let ext = item.outputFormat.isEmpty ? "avif" : item.outputFormat
+                        localKeys.insert("\(item.title).\(ext)")
+                    }
                 }
                 for obj in objects where !localKeys.contains(obj.key) {
                     let title = (obj.key as NSString).deletingPathExtension
@@ -326,13 +331,21 @@ struct ContentView: View {
                                    size: hasOriginal ? item.formattedOriginalSize : "—",
                                    resolution: hasOriginal ? item.formattedOriginalDimensions : "—",
                                    colorSpace: hasOriginal ? item.displayColorSpace : "—")
-                        let nowFormat = item.originalFilename.components(separatedBy: ".").last?.uppercased()
-                            ?? item.displayName.components(separatedBy: ".").last?.uppercased()
-                            ?? "—"
-                        let nowURL = item.webpURL ?? (item.originalFilename.isEmpty ? nil : ImageProcessor.cacheURL(for: item.title))
-                        previewRow(label: "Now", format: nowFormat, size: item.formattedWebPSize,
-                                   resolution: item.formattedDimensions,
-                                   colorSpace: colorSpaceFor(url: nowURL) ?? "—")
+                        if item.webpSize > 0 {
+                            let nowFormat: String = {
+                                if item.uploadedAt != nil {
+                                    return item.originalFilename.components(separatedBy: ".").last?.uppercased() ?? "—"
+                                }
+                                return item.outputFormat.uppercased()
+                            }()
+                            let nowURL = item.webpURL ?? (item.originalFilename.isEmpty ? nil : ImageProcessor.cacheURL(for: item.title))
+                            previewRow(label: "Now", format: nowFormat, size: item.formattedWebPSize,
+                                       resolution: item.formattedDimensions,
+                                       colorSpace: colorSpaceFor(url: nowURL) ?? "—")
+                        } else {
+                            previewRow(label: "Now", format: "—", size: "—",
+                                       resolution: "—", colorSpace: "—")
+                        }
                     }
                     Spacer()
                     Button { selectedItemIDs = []; previewItemID = nil } label: {
@@ -454,15 +467,19 @@ struct ContentView: View {
     }
     private func removeFromList(_ item: ImageItem) {
         guard let idx = imageItems.firstIndex(where: { $0.id == item.id }) else { return }
+        let sorted = sortedItems
+        let sortedIdx = sorted.firstIndex(where: { $0.id == item.id })
         selectedItemIDs.remove(item.id)
         previewItemID = nil
         imageItems.remove(at: idx)
-        // Auto-select next
-        if !imageItems.isEmpty {
-            let next = idx < imageItems.count ? imageItems[idx] : imageItems[imageItems.count - 1]
-            selectedItemIDs = [next.id]
+        // Auto-select next in sorted order
+        if let si = sortedIdx, !sorted.isEmpty {
+            let next = si < sorted.count - 1 ? sorted[si + 1] : (si > 0 ? sorted[si - 1] : nil)
+            if let next { selectedItemIDs = [next.id] }
         }
+        let ext = item.outputFormat.isEmpty ? "avif" : item.outputFormat
         let cacheURL = ImageProcessor.cacheURL(for: item.title)
+            .deletingPathExtension().appendingPathExtension(ext)
         try? FileManager.default.removeItem(at: cacheURL)
     }
     private func deleteSelected() {

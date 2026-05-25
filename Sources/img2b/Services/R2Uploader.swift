@@ -25,9 +25,10 @@ struct R2Uploader: Sendable {
     func upload(item: ImageItem, config: R2Config) async throws -> ImageItem {
         guard config.isValid else { throw Error.invalidConfig }
         let fileURL = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
-        guard let data = try? Data(contentsOf: fileURL) else { throw Error.networkError("Could not read AVIF file") }
+        guard let data = try? Data(contentsOf: fileURL) else { throw Error.networkError("Could not read output file") }
 
-        let key = "\(item.title).avif"
+        let ext = item.outputFormat.isEmpty ? "avif" : item.outputFormat
+        let key = "\(item.title).\(ext)"
         let payloadHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 
         let now = Date()
@@ -39,8 +40,9 @@ struct R2Uploader: Sendable {
         let encodedKey = key.s3Encoded
         let canonicalURI = "/\(encodedKey)"
 
+        let contentType = ext == "avif" ? "image/avif" : "application/octet-stream"
         let canonicalHeaders = [
-            "content-type:image/avif",
+            "content-type:\(contentType)",
             "host:\(host)",
             "x-amz-content-sha256:\(payloadHash)",
             "x-amz-date:\(amzDate)",
@@ -63,7 +65,7 @@ struct R2Uploader: Sendable {
 
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "PUT"
-        request.setValue("image/avif", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue(amzDate, forHTTPHeaderField: "x-amz-date")
         request.setValue(payloadHash, forHTTPHeaderField: "x-amz-content-sha256")
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
@@ -85,10 +87,9 @@ struct R2Uploader: Sendable {
         guard config.isValid else { throw Error.invalidConfig }
 
         let key: String = {
-            // R2-imported: originalFilename IS the R2 key
             if item.uploadedAt != nil, !item.originalFilename.isEmpty { return item.originalFilename }
-            // Locally processed + uploaded: key is title.avif
-            return "\(item.title).avif"
+            let ext = item.outputFormat.isEmpty ? "avif" : item.outputFormat
+            return "\(item.title).\(ext)"
         }()
         let emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 

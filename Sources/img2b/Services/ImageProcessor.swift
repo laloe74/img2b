@@ -109,10 +109,22 @@ struct ImageProcessor: Sendable {
 
         let encoded = try encodeImage(cgImage, toWidth: targetW, quality: quality)
 
-        // Don't make files bigger: keep original if compression didn't help
-        let finalData = encoded.count < data.count ? encoded : data
+        // If compression made it bigger, keep original file as-is
+        let finalData: Data
+        let finalOutputURL: URL
+        if encoded.count < data.count {
+            finalData = encoded
+            finalOutputURL = outputURL
+            item.outputFormat = "avif"
+        } else {
+            // Keep original file with original extension
+            finalData = data
+            let ext = url.pathExtension.isEmpty ? "avif" : url.pathExtension
+            finalOutputURL = cacheDir.appendingPathComponent("\(item.title).\(ext)")
+            item.outputFormat = ext
+        }
 
-        try finalData.write(to: outputURL)
+        try finalData.write(to: finalOutputURL)
 
         // Read output dimensions
         if let src = CGImageSourceCreateWithData(finalData as CFData, nil),
@@ -126,7 +138,7 @@ struct ImageProcessor: Sendable {
         onStep?(nil)
 
         var finalItem = item
-        finalItem.webpURL = outputURL
+        finalItem.webpURL = finalOutputURL
         finalItem.webpSize = Int64(finalData.count)
         finalItem.status = .ready
         return finalItem
@@ -160,7 +172,7 @@ struct ImageProcessor: Sendable {
         return try encodeCGImage(cgImage, quality: quality)
     }
 
-    // MARK: - AVIF encoding (sRGB fallback, HEIC last resort)
+    // MARK: - AVIF encoding (sRGB fallback only)
 
     private func encodeCGImage(_ cgImage: CGImage, quality: Int) throws -> Data {
         let q = CGFloat(quality) / 100.0
@@ -170,14 +182,7 @@ struct ImageProcessor: Sendable {
         if let normalized = convertToSRGB(cgImage),
            let data = tryEncodeAVIF(normalized, quality: q) { return data }
 
-        let heicData = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(heicData, "public.heic" as CFString, 1, nil)
-        else { throw Error.encodeFailed("HEIC encoder unavailable") }
-
-        CGImageDestinationAddImage(dest, cgImage, [kCGImageDestinationLossyCompressionQuality: q] as CFDictionary)
-
-        guard CGImageDestinationFinalize(dest) else { throw Error.encodeFailed("encode failed, \(cgImage.width)x\(cgImage.height)") }
-        return heicData as Data
+        throw Error.encodeFailed("AVIF encoding failed for \(cgImage.width)x\(cgImage.height)")
     }
 
     private func tryEncodeAVIF(_ image: CGImage, quality: CGFloat) -> Data? {

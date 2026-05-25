@@ -13,6 +13,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     var originalHeight: Int = 0
     var originalColorSpace: String = ""
     var uploadedAt: Date?
+    var outputFormat: String = ""  // actual output file extension, e.g. "avif"
     var category: String = ""
     var status: Status = .processing
     var originalFilename: String = ""
@@ -28,7 +29,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, hash16, title, dateString, fileSize, webpSize, width, height, originalWidth, originalHeight, originalColorSpace, uploadedAt, category, status, originalFilename
+        case id, hash16, title, dateString, fileSize, webpSize, width, height, originalWidth, originalHeight, originalColorSpace, uploadedAt, outputFormat, category, status, originalFilename
     }
 
     enum Status: Hashable, Codable {
@@ -65,10 +66,12 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     var displayName: String {
-        // R2-imported or original file: show actual filename
+        // R2-imported: show actual R2 filename
+        if uploadedAt != nil, !originalFilename.isEmpty { return originalFilename }
+        // After local compression: show generated title with actual format
+        if !title.isEmpty { return "\(title).\(outputFormat)" }
+        // Before compression: show original filename
         if !originalFilename.isEmpty { return originalFilename }
-        // After local compression: show generated title
-        if !title.isEmpty { return title + ".avif" }
         return "Untitled"
     }
 
