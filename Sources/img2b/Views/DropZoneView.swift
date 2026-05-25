@@ -15,18 +15,29 @@ struct DropZoneView: View {
     var body: some View {
         VStack {
             if isProcessing {
-                VStack(spacing: 8) {
+                VStack(spacing: 12) {
+                    // Progress bar with smooth animation
                     ProgressView(value: Double(processingProgress.current),
                                  total: Double(processingProgress.total))
                         .progressViewStyle(.linear)
+                        .animation(.smooth(duration: 0.3), value: processingProgress.current)
 
-                    Text(currentStep)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // Current operation indicator
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 14, height: 14)
+                        Text(currentStep)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
-                    Text("\(processingProgress.current) of \(processingProgress.total) images")
+                    // Progress count
+                    Text("\(processingProgress.current) of \(processingProgress.total)")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                        .contentTransition(.numericText())
+                        .animation(.default, value: processingProgress.current)
                 }
                 .frame(maxWidth: 280)
             } else if imageItems.isEmpty {

@@ -170,8 +170,8 @@ struct ContentView: View {
 
     @ViewBuilder
     private func previewView(for item: ImageItem) -> some View {
+        let localURL = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
         VStack(spacing: 0) {
-            let localURL = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
             if let cached = cachedPreview, cached.url == localURL {
                 Image(nsImage: cached.image)
                     .resizable()
@@ -191,9 +191,24 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if item.webpSize > 0 || item.webpURL != nil {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ContentUnavailableView("No Preview", systemImage: "eye.slash",
-                    description: Text("Compressed image not available"))
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text(isProcessing ? "Processing..." : "Waiting...")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if !currentStep.isEmpty {
+                        Text(currentStep)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
             Divider()
@@ -217,12 +232,6 @@ struct ContentView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
-                .task(id: localURL) {
-                    cachedPreview = nil
-                    if let img = NSImage(contentsOf: localURL) {
-                        cachedPreview = (localURL, img)
-                    }
-                }
                 Divider()
             }
 
@@ -231,11 +240,11 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.title + ".avif").font(.caption).fontWeight(.medium)
                             .padding(.bottom, 4)
-                        if item.webpSize > 0 {
-                            Text("\(Int((1 - item.compressionRatio) * 100))% smaller")
-                                .font(.caption2).foregroundStyle(.green)
-                                .fontDesign(.monospaced)
-                        }
+                        Text(item.webpSize > 0
+                             ? "\(Int((1 - item.compressionRatio) * 100))% smaller"
+                             : " ")
+                            .font(.caption2).foregroundStyle(.green)
+                            .fontDesign(.monospaced)
                         previewRow(label: "Original", format: originalFormat, size: item.formattedOriginalSize,
                                    resolution: item.formattedOriginalDimensions != "-"
                                        ? item.formattedOriginalDimensions
@@ -243,11 +252,11 @@ struct ContentView: View {
                                    colorSpace: item.displayColorSpace != "-"
                                        ? item.displayColorSpace
                                        : (colorSpaceFor(url: item.originalURL) ?? "-"))
-                        if item.webpSize > 0 {
-                            previewRow(label: "Now", format: "AVIF", size: item.formattedWebPSize,
-                                       resolution: item.formattedDimensions,
-                                       colorSpace: colorSpaceFor(url: item.webpURL ?? ImageProcessor.cacheURL(for: item.title)) ?? "-")
-                        }
+                        previewRow(label: "Now", format: "AVIF", size: item.formattedWebPSize,
+                                   resolution: item.formattedDimensions,
+                                   colorSpace: item.webpSize > 0
+                                       ? (colorSpaceFor(url: item.webpURL ?? ImageProcessor.cacheURL(for: item.title)) ?? "-")
+                                       : "-")
                     }
                     Spacer()
                     Button { selectedItemIDs = []; previewItemID = nil } label: {
@@ -257,6 +266,15 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
+        }
+        .task(id: localURL) {
+            cachedPreview = nil
+            let url = localURL
+            if let img = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+                NSImage(contentsOf: url)
+            }.value {
+                cachedPreview = (url, img)
+            }
         }
     }
 
