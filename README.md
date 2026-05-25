@@ -1,19 +1,10 @@
 # img2b
 
-macOS 26 原生博客图床工具。拖入图片 → 自动转 WebP → 上传 R2/S3 → TOML 输出。
+macOS 原生博客图床工具。拖入图片 → 自动转 AVIF → 上传 R2/S3 → TOML 输出。
 
 ## 安装
 
-### Homebrew
-
-```bash
-brew tap laloe74/img2b
-brew install --cask img2b
-```
-
-### 手动安装
-
-从 [Releases](https://github.com/laloe74/img2b/releases) 下载 DMG，拖入 Applications。
+从 [Releases](https://github.com/laloe74/img2b/releases) 下载 DMG，拖入 Applications 安装。
 
 ## 使用
 
@@ -42,7 +33,9 @@ brew install --cask img2b
 category = "photography"
 date = 2026-05-24
 title = "img-5a833392f4b928b1-20260524"
-url = "https://image.tongmingzhi.com/img-5a833392f4b928b1-20260524.webp"
+url = "https://image.tongmingzhi.com/img-5a833392f4b928b1-20260524.avif"
+width = 2560
+height = 1440
 ```
 
 模板可在设置中自定义。
@@ -60,16 +53,25 @@ url = "https://image.tongmingzhi.com/img-5a833392f4b928b1-20260524.webp"
 
 ### 5. 压缩设置
 
-- **Lossless** — 无损压缩（像素完美，文件大）
-- **Quality** — 75-100，90 接近无损
-- **Target Size** — 目标文件大小，超标自动降质+缩图
+6 级压缩（Zipic 风格）：
+
+| 级别 | 标签 | 说明 |
+|------|------|------|
+| 1 | Near Lossless | 最小数据移除，最高画质 |
+| 2 | Light | 肉眼几乎不可察觉 |
+| 3 | Balanced | 推荐，适合大多数图片 |
+| 4 | Moderate | 近距离观察可见差异 |
+| 5 | Aggressive | 显著减小体积 |
+| 6 | Extreme | 最小文件，画质可见下降 |
+
+可设置最大宽度（超过则等比缩放），0 表示不限制。
 
 ## 技术栈
 
-- SwiftUI (macOS 26)
-- libvips (图片压缩)
-- AWS Signature V4 (S3/R2 上传)
-- GitHub Releases (自动更新)
+- SwiftUI (macOS 15+)
+- ImageIO (原生 AVIF 编码)
+- AWS Signature V4 (手写签名，无需 AWS SDK)
+- GitHub Releases (更新检测)
 
 ## License
 
