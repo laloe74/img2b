@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.2 — 2026-05-25
+
+  - 661ec40 Preview loading states, progress animation, and fixed info bar height
+
+
 ## v0.2.1 — 2026-05-25
 
   - 90e5c82 Category toggle, upload flow, preview cache, and UI polish
