@@ -28,5 +28,13 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Personal use</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/laloe74/img2b/main/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>MCowBQYDK2VwAyEAFORJ1y8kHxacALQT8DEonJIz6t38uUuyjery3F+2tVo=</string>
+	<key>SUEnableInstallerLauncherService</key>
+	<false/>
 </dict>
 </plist>

@@ -1,4 +1,5 @@
 import SwiftUI
+import Sparkle
 
 extension Notification.Name {
     static let openSettings = Notification.Name("openSettings")
@@ -8,8 +9,12 @@ extension Notification.Name {
 struct Image2BlogApp: App {
     @State private var imageItems: [ImageItem] = loadItems()
     @State private var r2Config = R2Config.load()
-    private let updater = Updater()
     private let saveTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     var body: some Scene {
         WindowGroup {
@@ -23,7 +28,7 @@ struct Image2BlogApp: App {
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates...") {
-                    Task { await updater.checkForUpdates(manual: true) }
+                    updaterController.checkForUpdates(nil)
                 }
             }
             CommandGroup(replacing: .appSettings) {

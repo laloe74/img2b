@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<channel>
+  <title>img2b</title>
+  <item>
+    <title>Version 0.2.7</title>
+    <sparkle:version>1</sparkle:version>
+    <sparkle:shortVersionString>0.2.7</sparkle:shortVersionString>
+    <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+    <enclosure url="https://github.com/laloe74/img2b/releases/download/v0.2.7/img2b-v0.2.7.dmg"
+               sparkle:edSignature="Eo8s4ATzJtHn1UDtKpaN+QDuEqIoczXYoj1ZLW0LnqdBWb6HDkWE1n90bPbb/Si69rcRbywiNRo2qSzUTDWSCA=="
+               sparkle:length="1327872"
+               type="application/octet-stream"/>
+  </item>
+</channel>
+</rss>

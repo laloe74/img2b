@@ -56,6 +56,43 @@ sed -i '' "s/sha256.*/sha256 \"$SHA256\"/" "$PROJECT_DIR/Casks/img2b.rb"
 sed -i '' "s/^  version.*/  version \"${VERSION#v}\"/" "$PROJECT_DIR/Casks/img2b.rb"
 echo "Updated Casks/img2b.rb"
 
+# Generate Sparkle appcast (with EdDSA signing)
+DMG_SIZE=$(stat -f%z "/tmp/$DMG_NAME")
+ED_SIG=$(python3 -c "
+import struct, base64, subprocess
+size = $DMG_SIZE
+size_bytes = struct.pack('<Q', size)
+with open('/tmp/$DMG_NAME', 'rb') as f:
+    data = f.read()
+with open('/tmp/sparkle_sign_input', 'wb') as f:
+    f.write(size_bytes + data)
+result = subprocess.run(['openssl', 'pkeyutl', '-sign', '-inkey', '/tmp/sparkle_private.pem',
+    '-in', '/tmp/sparkle_sign_input'], capture_output=True)
+print(base64.b64encode(result.stdout).decode())
+")
+DMG_URL="https://github.com/laloe74/img2b/releases/download/${VERSION}/${DMG_NAME}"
+BUILD_NUM=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PROJECT_DIR/Resources/Info.plist")
+
+cat > "$PROJECT_DIR/appcast.xml" << APPCASTEOF
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<channel>
+  <title>img2b</title>
+  <item>
+    <title>Version ${VERSION#v}</title>
+    <sparkle:version>${BUILD_NUM}</sparkle:version>
+    <sparkle:shortVersionString>${VERSION#v}</sparkle:shortVersionString>
+    <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+    <enclosure url="${DMG_URL}"
+               sparkle:edSignature="${ED_SIG}"
+               sparkle:length="${DMG_SIZE}"
+               type="application/octet-stream"/>
+  </item>
+</channel>
+</rss>
+APPCASTEOF
+echo "Generated appcast.xml"
+
 # Update CHANGELOG
 CHANGELOG="$PROJECT_DIR/CHANGELOG.md"
 TEMP=$(mktemp)
@@ -72,7 +109,7 @@ mv "$TEMP" "$CHANGELOG"
 
 # Commit, tag, push
 cd "$PROJECT_DIR"
-git add -A
+git add -A appcast.xml
 git commit -m "$VERSION" || echo "No changes to commit"
 git tag -a "$VERSION" -m "$VERSION — $DATE"
 git push origin main --tags
