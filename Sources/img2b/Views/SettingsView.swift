@@ -100,33 +100,36 @@ struct SettingsView: View {
                         }
                         .disabled(newCategory.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
-                    ForEach($categories) { $cat in
-                        if cat.name != "none" {
+                    ForEach(categories.indices, id: \.self) { idx in
+                        if categories[idx].name != "none" {
                             HStack(spacing: 8) {
                                 Menu {
                                     ForEach(CategoryItem.defaults) { def in
-                                        Button { cat.icon = def.icon } label: {
+                                        Button { categories[idx].icon = def.icon } label: {
                                             Label(def.name, systemImage: def.icon)
                                         }
                                     }
                                 } label: {
-                                    Image(systemName: cat.icon).frame(width: 20)
+                                    Image(systemName: categories[idx].icon).frame(width: 20)
                                 }
                                 .menuStyle(.borderlessButton)
 
-                                TextField("", text: $cat.name)
-                                    .textFieldStyle(.plain)
-                                    .onSubmit {
-                                        let old = renames.first(where: { $0.value == cat.name })?.key
-                                            ?? config.categories.first(where: { $0.id == cat.id })?.name
-                                        if let old, old != cat.name { renames[old] = cat.name }
+                                TextField("", text: Binding(
+                                    get: { categories[idx].name },
+                                    set: { new in
+                                        let old = categories[idx].name
+                                        categories[idx].name = new
+                                        if old != new { renames[old] = new }
                                     }
+                                ))
+                                    .textFieldStyle(.plain)
 
                                 Spacer()
 
                                 Button(role: .destructive) {
-                                    categories.removeAll { $0.name == cat.name }
-                                    if defaultCategory == cat.name { defaultCategory = categories.first?.name ?? "" }
+                                    let name = categories[idx].name
+                                    categories.removeAll { $0.name == name }
+                                    if defaultCategory == name { defaultCategory = categories.first?.name ?? "" }
                                 } label: {
                                     Image(systemName: "trash").font(.caption)
                                 }

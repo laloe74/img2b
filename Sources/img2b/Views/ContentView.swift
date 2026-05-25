@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var previewItemID: UUID?
     @State private var showCategoryModal = false
+    @State private var cachedPreview: (url: URL, image: NSImage)?
 
     private var selectedItem: ImageItem? {
         let id = previewItemID ?? selectedItemIDs.first
@@ -44,16 +45,18 @@ struct ContentView: View {
             }
             .listStyle(.sidebar)
             .onSidebarEmptyClick(selectedItemIDs: $selectedItemIDs)
+            .navigationTitle("")
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
             detailContent
+                .navigationTitle("")
         }
         .toolbar { appToolbar }
         .sheet(isPresented: $showSettings) {
             SettingsView(config: $r2Config, imageItems: $imageItems)
         }
         .confirmationDialog("Delete from R2?", isPresented: $showDeleteConfirm) {
-            Button("Delete from R2 (\(itemsToDelete.count))", role: .destructive) {
+            Button(deleteDialogTitle, role: .destructive) {
                 for item in itemsToDelete { deleteFromR2(item) }
             }
             Button("Remove from List Only") {
@@ -61,7 +64,7 @@ struct ContentView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("\(itemsToDelete.count) file(s) will be permanently deleted from R2 storage.")
+            Text(deleteDialogMessage)
         }
         .categoryModal(
             isPresented: $showCategoryModal,
@@ -69,7 +72,6 @@ struct ContentView: View {
             defaultCategory: $r2Config.defaultCategory,
             onSave: { r2Config.save() }
         )
-        .navigationTitle("")
         .onChange(of: selectedItemIDs) { _, newValue in
             if newValue.count <= 1 { previewItemID = nil }
         }
@@ -117,7 +119,8 @@ struct ContentView: View {
                 uploader: uploader,
                 clipboard: clipboard,
                 onUpdate: { updateItem($0) },
-                onDelete: { handleDelete(item) }
+                onDelete: { handleDelete(item) },
+                onUploadComplete: { handleUploadResult($0) }
             )
             .tag(item.id)
         }
@@ -137,49 +140,21 @@ struct ContentView: View {
                 Image(systemName: "icloud.and.arrow.up")
             }
             .disabled(selectedUploadable.isEmpty)
-            .help("Upload Selected")
+            .help("Upload")
             Button(action: deleteSelected) {
                 Image(systemName: "trash")
             }
             .disabled(selectedItemIDs.isEmpty)
             .help("Delete")
-            .tint(.red)
             if !uploadedOnly.isEmpty {
-                Button(action: copyAll) {
-                    Image(systemName: "doc.on.clipboard")
+                Button(action: copyURLs) {
+                    Image(systemName: "link")
                 }
-                .help("Copy TOML")
+                .help("Copy URL")
             }
         }
-        if !imageItems.isEmpty, r2Config.categories.count > 1 {
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 4) {
-                    ForEach(r2Config.categories) { cat in
-                        Button { setCategory(cat.name) } label: {
-                            Image(systemName: cat.icon)
-                                .font(.system(size: 14, weight: .medium))
-                        }
-                        .buttonStyle(.borderless)
-                        .frame(width: 30, height: 30)
-                        .background(isSelected(cat.name) ? Circle().fill(.blue) : Circle().fill(.clear))
-                        .foregroundStyle(isSelected(cat.name) ? .white : .secondary)
-                        .help(cat.name)
-                    }
-                    Button {
-                        showCategoryModal = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .buttonStyle(.borderless)
-                    .frame(width: 30, height: 30)
-                    .foregroundStyle(.secondary)
-                    .help("New category")
-                }
-                .padding(4)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            }
-        }
+
+
         ToolbarItemGroup {
             Button(action: { showSettings = true }) {
                 Image(systemName: "gearshape")
@@ -188,14 +163,17 @@ struct ContentView: View {
         }
     }
 
+    private var deleteDialogTitle: String { "Delete from R2 (\(itemsToDelete.count))" }
+    private var deleteDialogMessage: String { "\(itemsToDelete.count) file(s) will be permanently deleted from R2 storage." }
+
     // MARK: - Preview
 
     @ViewBuilder
     private func previewView(for item: ImageItem) -> some View {
         VStack(spacing: 0) {
             let localURL = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
-            if let nsImage = NSImage(contentsOf: localURL) {
-                Image(nsImage: nsImage)
+            if let cached = cachedPreview, cached.url == localURL {
+                Image(nsImage: cached.image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -220,6 +198,34 @@ struct ContentView: View {
 
             Divider()
 
+            // Category selector
+            let cats = r2Config.categories.filter { $0.name != "none" }
+            if !cats.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(cats) { cat in
+                        let selected = item.category == cat.name || (item.category.isEmpty && cat.name == r2Config.defaultCategory)
+                        Image(systemName: cat.icon)
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(selected ? .blue : .clear))
+                            .overlay { if !selected { Circle().stroke(.quaternary, lineWidth: 1) } }
+                            .foregroundStyle(selected ? .white : .secondary)
+                            .contentShape(Circle())
+                            .onTapGesture { toggleCategory(cat.name) }
+                            .help(cat.name)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .task(id: localURL) {
+                    cachedPreview = nil
+                    if let img = NSImage(contentsOf: localURL) {
+                        cachedPreview = (localURL, img)
+                    }
+                }
+                Divider()
+            }
+
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -231,10 +237,16 @@ struct ContentView: View {
                                 .fontDesign(.monospaced)
                         }
                         previewRow(label: "Original", format: originalFormat, size: item.formattedOriginalSize,
-                                   url: item.originalURL)
+                                   resolution: item.formattedOriginalDimensions != "-"
+                                       ? item.formattedOriginalDimensions
+                                       : (resolutionFor(url: item.originalURL) ?? "-"),
+                                   colorSpace: item.displayColorSpace != "-"
+                                       ? item.displayColorSpace
+                                       : (colorSpaceFor(url: item.originalURL) ?? "-"))
                         if item.webpSize > 0 {
                             previewRow(label: "Now", format: "AVIF", size: item.formattedWebPSize,
-                                       url: item.webpURL ?? ImageProcessor.cacheURL(for: item.title))
+                                       resolution: item.formattedDimensions,
+                                       colorSpace: colorSpaceFor(url: item.webpURL ?? ImageProcessor.cacheURL(for: item.title)) ?? "-")
                         }
                     }
                     Spacer()
@@ -266,7 +278,7 @@ struct ContentView: View {
         return "\(w)\u{2009}\u{00d7}\u{2009}\(h)"
     }
 
-    private func previewRow(label: String, format: String, size: String, url: URL?) -> some View {
+    private func previewRow(label: String, format: String, size: String, resolution: String, colorSpace: String) -> some View {
         HStack(spacing: 12) {
             Text(label)
                 .font(.caption2).fontWeight(.medium).foregroundStyle(.secondary)
@@ -279,11 +291,11 @@ struct ContentView: View {
                 .font(.caption2).foregroundStyle(.secondary)
                 .frame(width: 64, alignment: .trailing)
                 .fontDesign(.monospaced)
-            Text(resolutionFor(url: url) ?? "-")
+            Text(resolution)
                 .font(.caption2).foregroundStyle(.secondary)
                 .frame(width: 88, alignment: .trailing)
                 .fontDesign(.monospaced)
-            Text(colorSpaceFor(url: url) ?? "-")
+            Text(colorSpace)
                 .font(.caption2).foregroundStyle(.secondary)
                 .frame(width: 160, alignment: .leading)
                 .lineLimit(1)
@@ -317,11 +329,12 @@ struct ContentView: View {
     }
 
 
-    private func setCategory(_ name: String) {
+    private func toggleCategory(_ name: String) {
         guard let sel = selectedItem,
               let idx = imageItems.firstIndex(where: { $0.id == sel.id })
         else { return }
-        imageItems[idx].category = name
+        // If already selected, toggle back to none
+        imageItems[idx].category = sel.category == name ? "none" : name
     }
 
     private func updateItem(_ updated: ImageItem) {
@@ -399,8 +412,7 @@ struct ContentView: View {
                     let result = try await uploader.upload(item: updated, config: r2Config)
                     if let idx = imageItems.firstIndex(where: { $0.id == result.id }) {
                         imageItems[idx] = result
-                        clipboard.appendToFile(item: result, config: r2Config)
-                        if case .uploaded(let url) = result.status { clipboard.copyToClipboard(url) }
+                        handleUploadResult(result)
                     }
                 } catch {
                     if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
@@ -411,8 +423,22 @@ struct ContentView: View {
             isUploading = false
         }
     }
-    private func copyAll() {
-        clipboard.copyToClipboard(clipboard.generateTOML(for: imageItems, config: r2Config))
+    private func handleUploadResult(_ item: ImageItem) {
+        let cat = item.category.isEmpty ? r2Config.defaultCategory : item.category
+        if cat == "none", case .uploaded(let url) = item.status {
+            clipboard.copyToClipboard("![](" + url + ")")
+        } else {
+            clipboard.appendToFile(item: item, config: r2Config)
+            if case .uploaded(let url) = item.status { clipboard.copyToClipboard(url) }
+        }
+    }
+
+    private func copyURLs() {
+        let urls = imageItems.filter { selectedItemIDs.contains($0.id) }.compactMap { item -> String? in
+            guard case .uploaded(let url) = item.status else { return nil }
+            return url
+        }
+        clipboard.copyToClipboard(urls.joined(separator: "\n"))
     }
 
     private func handleDetailDrop(providers: [NSItemProvider]) {
@@ -506,12 +532,15 @@ struct SidebarRow: View {
     let clipboard: ClipboardService
     let onUpdate: (ImageItem) -> Void
     let onDelete: () -> Void
+    let onUploadComplete: (ImageItem) -> Void
 
     init(item: ImageItem, isSelected: Bool, config: R2Config, uploader: R2Uploader, clipboard: ClipboardService,
-         onUpdate: @escaping (ImageItem) -> Void, onDelete: @escaping () -> Void) {
+         onUpdate: @escaping (ImageItem) -> Void, onDelete: @escaping () -> Void,
+         onUploadComplete: @escaping (ImageItem) -> Void) {
         self.item = item; self.isSelected = isSelected
         self.config = config; self.uploader = uploader
         self.clipboard = clipboard; self.onUpdate = onUpdate; self.onDelete = onDelete
+        self.onUploadComplete = onUploadComplete
     }
 
     var body: some View {
@@ -621,8 +650,7 @@ struct SidebarRow: View {
             do {
                 let result = try await uploader.upload(item: updated, config: config)
                 var final = result; final.category = cat; onUpdate(final)
-                clipboard.appendToFile(item: final, config: config)
-                if case .uploaded(let url) = result.status { clipboard.copyToClipboard(url) }
+                onUploadComplete(final)
             } catch {
                 var failed = item; failed.status = .error(error.localizedDescription); onUpdate(failed)
             }

@@ -9,6 +9,9 @@ struct ImageItem: Identifiable, Hashable, Codable {
     var webpSize: Int64 = 0
     var width: Int = 0
     var height: Int = 0
+    var originalWidth: Int = 0
+    var originalHeight: Int = 0
+    var originalColorSpace: String = ""
     var category: String = ""
     var status: Status = .processing
     var originalFilename: String = ""
@@ -24,7 +27,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, hash16, title, dateString, fileSize, webpSize, width, height, category, status, originalFilename
+        case id, hash16, title, dateString, fileSize, webpSize, width, height, originalWidth, originalHeight, originalColorSpace, category, status, originalFilename
     }
 
     enum Status: Hashable, Codable {
@@ -77,5 +80,19 @@ struct ImageItem: Identifiable, Hashable, Codable {
     var compressionRatio: Double {
         guard fileSize > 0, webpSize > 0 else { return 0 }
         return Double(webpSize) / Double(fileSize)
+    }
+
+    var formattedOriginalDimensions: String {
+        guard originalWidth > 0 else { return "-" }
+        return "\(originalWidth)\u{2009}\u{00d7}\u{2009}\(originalHeight)"
+    }
+
+    var formattedDimensions: String {
+        guard width > 0 else { return "-" }
+        return "\(width)\u{2009}\u{00d7}\u{2009}\(height)"
+    }
+
+    var displayColorSpace: String {
+        originalColorSpace.isEmpty ? "-" : originalColorSpace
     }
 }

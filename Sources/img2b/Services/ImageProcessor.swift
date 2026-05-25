@@ -91,6 +91,15 @@ struct ImageProcessor: Sendable {
               let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { throw Error.loadFailed("\(data.count) bytes, type unknown") }
 
+        // Capture original metadata
+        item.originalWidth = cgImage.width
+        item.originalHeight = cgImage.height
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            item.originalColorSpace = (props[kCGImagePropertyProfileName] as? String)
+                ?? (props[kCGImagePropertyColorModel] as? String)
+                ?? ""
+        }
+
         // Resolve width: only resize if exceeding maxWidth (0 = no limit)
         let origW = cgImage.width
         let targetW = maxWidth > 0 ? min(origW, maxWidth) : origW
