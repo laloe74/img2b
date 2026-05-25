@@ -32,8 +32,11 @@ echo "=== Building $APP_NAME $VERSION ==="
 
 # Update version before building
 VERSION_NUM="${VERSION#v}"
+CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PROJECT_DIR/Resources/Info.plist")
+NEW_BUILD=$((CURRENT_BUILD + 1))
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION_NUM" "$PROJECT_DIR/Resources/Info.plist"
-echo "Updated Info.plist version to $VERSION_NUM"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD" "$PROJECT_DIR/Resources/Info.plist"
+echo "Updated Info.plist version to $VERSION_NUM build $NEW_BUILD"
 
 # Build release
 source "$PROJECT_DIR/Scripts/build-app.sh"
