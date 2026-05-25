@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.4 — 2026-05-25
+
+  - 0dc761d R2 sync, delete fix, and preview polish
+
+
 ## v0.2.3 — 2026-05-25
 
   - 723c2b7 Shimmer skeleton loading in sidebar for processing/uploading items
