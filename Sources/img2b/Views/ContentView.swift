@@ -566,34 +566,18 @@ struct SidebarRow: View {
             statusIcon
                 .padding(.top, 5)
 
-            if case .processing = item.status {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.displayName)
-                        .font(.system(.callout, design: .rounded))
-                        .lineLimit(1).truncationMode(.middle)
-                    Text("Processing...")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(" ")
-                        .font(.caption2)
-                }
-            } else if case .uploading = item.status {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.displayName)
-                        .font(.system(.callout, design: .rounded))
-                        .lineLimit(1).truncationMode(.middle)
-                    Text("Uploading...")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(" ")
-                        .font(.caption2)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.displayName)
-                        .font(.system(.callout, design: .rounded))
-                        .lineLimit(1).truncationMode(.middle)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.displayName)
+                    .font(.system(.callout, design: .rounded))
+                    .lineLimit(1).truncationMode(.middle)
 
+                if case .processing = item.status {
+                    Color.clear.frame(height: 12).overlay(alignment: .leading) { ShimmerBlock(width: 80, height: 10) }
+                    Color.clear.frame(height: 12).overlay(alignment: .leading) { ShimmerBlock(width: 50, height: 10) }
+                } else if case .uploading = item.status {
+                    Color.clear.frame(height: 12).overlay(alignment: .leading) { ShimmerBlock(width: 80, height: 10) }
+                    Color.clear.frame(height: 12).overlay(alignment: .leading) { ShimmerBlock(width: 50, height: 10) }
+                } else {
                     Text("Type: \(cat)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -727,5 +711,31 @@ struct ShimmerModifier: ViewModifier {
             }
         )
         .onAppear { withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) { phase = 1 } }
+    }
+}
+
+struct ShimmerBlock: View {
+    let width: CGFloat
+    let height: CGFloat
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(.quaternary)
+            .frame(width: width, height: height)
+            .overlay {
+                GeometryReader { geo in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(.quaternary.opacity(0.6))
+                        .frame(width: geo.size.width * 0.6)
+                        .offset(x: phase * geo.size.width * 1.4)
+                }
+            }
+            .clipped()
+            .onAppear {
+                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                    phase = 1
+                }
+            }
     }
 }
