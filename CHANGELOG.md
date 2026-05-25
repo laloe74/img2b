@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.0 — 2026-05-25
+
+  - 8c17e73 Zipic-style 6-level compression: single-pass AVIF encode, width-only constraint
+
+
 ## v0.1.1 — 2026-05-25
 
   - 4511b8e Category system with icons, per-item category selection, clean toolbar layout
