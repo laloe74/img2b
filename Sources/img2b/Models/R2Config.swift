@@ -22,9 +22,8 @@ struct R2Config: Codable, Equatable {
     var secretAccessKey: String = ""
     var bucketName: String = ""
     var publicURLBase: String = ""
-    var quality: Int = 90
-    var useLossless: Bool = false
-    var maxFileSizeKB: Int = 500
+    var compressionLevel: Int = 3  // 1–6, 3=balanced
+    var maxWidth: Int = 0          // 0 = no limit, px
     var namePattern: String = "img-{hash16}-{date}"
     var tomlFilePath: String = ""
     var tomlTemplate: String = """
@@ -116,9 +115,8 @@ struct R2Config: Codable, Equatable {
                 config.secretAccessKey = dict["secretAccessKey"] as? String ?? ""
                 config.bucketName = dict["bucketName"] as? String ?? ""
                 config.publicURLBase = dict["publicURLBase"] as? String ?? ""
-                config.quality = dict["quality"] as? Int ?? 90
-                config.useLossless = dict["useLossless"] as? Bool ?? false
-                config.maxFileSizeKB = dict["maxFileSizeKB"] as? Int ?? 500
+                config.compressionLevel = dict["compressionLevel"] as? Int ?? 3
+                config.maxWidth = dict["maxWidth"] as? Int ?? 0
                 config.namePattern = dict["namePattern"] as? String ?? "img-{hash16}-{date}"
                 config.tomlFilePath = dict["tomlFilePath"] as? String ?? ""
                 config.tomlTemplate = dict["tomlTemplate"] as? String ?? config.tomlTemplate

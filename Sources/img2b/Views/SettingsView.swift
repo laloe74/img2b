@@ -9,18 +9,18 @@ struct SettingsView: View {
     @State private var secretAccessKey: String
     @State private var bucketName: String
     @State private var publicURLBase: String
-    @State private var quality: Double
-    @State private var useLossless: Bool
-    @State private var maxFileSizeKB: Double
+    @State private var compressionLevel: Int
+    @State private var maxWidth: String
     @State private var namePattern: String
     @State private var tomlFilePath: String
     @State private var tomlTemplate: String
     @State private var categories: [CategoryItem]
     @State private var defaultCategory: String
     @State private var newCategory: String = ""
-    @State private var renames: [String: String] = [:]  // old -> new
+    @State private var renames: [String: String] = [:]
 
     @Environment(\.dismiss) private var dismiss
+    @State private var clickMonitor: Any?
 
     init(config: Binding<R2Config>, imageItems: Binding<[ImageItem]>) {
         self._config = config
@@ -30,12 +30,11 @@ struct SettingsView: View {
         self._secretAccessKey = State(initialValue: config.wrappedValue.secretAccessKey)
         self._bucketName = State(initialValue: config.wrappedValue.bucketName)
         self._publicURLBase = State(initialValue: config.wrappedValue.publicURLBase)
-        self._quality = State(initialValue: Double(config.wrappedValue.quality))
-        self._useLossless = State(initialValue: config.wrappedValue.useLossless)
+        self._compressionLevel = State(initialValue: config.wrappedValue.compressionLevel)
+        self._maxWidth = State(initialValue: String(config.wrappedValue.maxWidth))
         self._namePattern = State(initialValue: config.wrappedValue.namePattern)
         self._tomlFilePath = State(initialValue: config.wrappedValue.tomlFilePath)
         self._tomlTemplate = State(initialValue: config.wrappedValue.tomlTemplate)
-        self._maxFileSizeKB = State(initialValue: Double(config.wrappedValue.maxFileSizeKB))
         self._categories = State(initialValue: config.wrappedValue.categories)
         self._defaultCategory = State(initialValue: config.wrappedValue.defaultCategory)
     }
@@ -139,28 +138,52 @@ struct SettingsView: View {
 
                 // MARK: Image Compression
                 Section {
-                    Toggle("Lossless", isOn: $useLossless)
-
-                    if !useLossless {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Quality"); Spacer()
-                                Text("\(Int(quality))%").foregroundStyle(.secondary).fontDesign(.monospaced)
-                            }
-                            Slider(value: $quality, in: 75...100, step: 1)
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Compression Level
+                        HStack {
+                            Text("Compression Level")
+                            Spacer()
+                            Text("\(compressionLevel)")
+                                .foregroundStyle(.secondary)
+                                .fontDesign(.monospaced)
+                        }
+                        HStack {
+                            Spacer()
+                            CompressionLevelSlider(level: $compressionLevel)
+                                .frame(width: 220)
                         }
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Max File Size"); Spacer()
-                                Text("\(Int(maxFileSizeKB)) KB").foregroundStyle(.secondary).fontDesign(.monospaced)
-                            }
-                            Slider(value: $maxFileSizeKB, in: 100...2000, step: 50)
+                        Divider()
+
+                        // Max Width
+                        HStack {
+                            Text("Max Width")
+                            Spacer()
+                            TextField("", text: $maxWidth, prompt: Text("0"))
+                                .labelsHidden()
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 64)
+                                .multilineTextAlignment(.trailing)
+                                .monospacedDigit()
+                            Text("px")
+                                .foregroundStyle(.secondary)
                         }
                     }
                 } header: { Text("Image Compression") }
             }
             .formStyle(.grouped)
+        }
+        .onAppear {
+            clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+                NSApp.keyWindow?.makeFirstResponder(nil)
+                return event
+            }
+        }
+        .onDisappear {
+            if let monitor = clickMonitor {
+                NSEvent.removeMonitor(monitor)
+                clickMonitor = nil
+            }
         }
         .frame(width: 460, height: 560)
     }
@@ -171,13 +194,11 @@ struct SettingsView: View {
         config.secretAccessKey = secretAccessKey.trimmingCharacters(in: .whitespaces)
         config.bucketName = bucketName.trimmingCharacters(in: .whitespaces)
         config.publicURLBase = publicURLBase.trimmingCharacters(in: .whitespaces)
-        config.quality = Int(quality)
-        config.useLossless = useLossless
+        config.compressionLevel = compressionLevel
+        config.maxWidth = Int(maxWidth) ?? 0
         config.namePattern = namePattern.trimmingCharacters(in: .whitespaces)
         config.tomlFilePath = tomlFilePath.trimmingCharacters(in: .whitespaces)
         config.tomlTemplate = tomlTemplate
-        config.maxFileSizeKB = Int(maxFileSizeKB)
-        // Apply renames to existing items
         for (old, new) in renames where old != new {
             for i in imageItems.indices where imageItems[i].category == old {
                 imageItems[i].category = new

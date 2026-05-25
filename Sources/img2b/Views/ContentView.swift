@@ -459,9 +459,9 @@ struct ContentView: View {
                     defer { if accessing { url.stopAccessingSecurityScopedResource() } }
                     do {
                         let processed = try await processor.processImage(
-                            at: url, quality: r2Config.quality,
-                            lossless: r2Config.useLossless,
-                            maxSizeKB: r2Config.maxFileSizeKB,
+                            at: url,
+                            level: r2Config.compressionLevel,
+                            maxWidth: r2Config.maxWidth,
                             namePattern: r2Config.namePattern,
                             onStep: { step in DispatchQueue.main.async { currentStep = step ?? "" } }
                         )
