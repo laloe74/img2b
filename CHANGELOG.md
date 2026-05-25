@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.3 — 2026-05-25
+
+  - 723c2b7 Shimmer skeleton loading in sidebar for processing/uploading items
+
+
 ## v0.2.2 — 2026-05-25
 
   - 661ec40 Preview loading states, progress animation, and fixed info bar height

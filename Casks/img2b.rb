@@ -1,6 +1,6 @@
 cask "img2b" do
-  version "0.2.2"
-  sha256 "50310fc04ed5f7969b3e72a9a38f99f6cb28d880c99549d6c6ce93575e2b83ff"
+  version "0.2.3"
+  sha256 "1bc561afa8b9873f22075287474ddb023b526aae445af4921405f6fbb66e14cf"
 
   url "https://github.com/laloe74/img2b/releases/download/v#{version}/img2b-v#{version}.dmg"
   name "img2b"
