@@ -20,10 +20,10 @@ struct ContentView: View {
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var previewItemID: UUID?
     @State private var showCategoryModal = false
-    @State private var cachedPreview: (url: URL, image: NSImage, width: Int, height: Int)?
+    @State private var previewCache: [URL: (image: NSImage, width: Int, height: Int)] = [:]
     @State private var isSyncing = false
-    @State private var errorMessage: String?
     @State private var showError = false
+    @State private var errorDetail = ""
 
     private var selectedItem: ImageItem? {
         let id = previewItemID ?? selectedItemIDs.first
@@ -58,10 +58,32 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(config: $r2Config, imageItems: $imageItems)
         }
-        .alert("Error", isPresented: $showError) {
-            Button("OK") {}
-        } message: {
-            Text(errorMessage ?? "")
+        .sheet(isPresented: $showError) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Error").font(.headline)
+                    Spacer()
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(errorDetail, forType: .string)
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    Button("Close") { showError = false }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                        .keyboardShortcut(.return)
+                }
+                .padding()
+                Divider()
+                ScrollView([.vertical, .horizontal]) {
+                    Text(verbatim: errorDetail.isEmpty ? "(empty)" : errorDetail)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(width: 640, height: 360)
         }
         .confirmationDialog("Delete from R2?", isPresented: $showDeleteConfirm) {
             Button(deleteDialogTitle, role: .destructive) {
@@ -85,7 +107,19 @@ struct ContentView: View {
         }
         .onExitCommand { selectedItemIDs = []; previewItemID = nil }
         .background(WindowSeparatorRemover())
-        .onAppear { Task { await updater.checkForUpdates() } }
+        .onAppear {
+            Task { await updater.checkForUpdates() }
+            // One-time migration: populate upload dates
+            if !UserDefaults.standard.bool(forKey: "migratedUploadDates") {
+                UserDefaults.standard.set(true, forKey: "migratedUploadDates")
+                let now = Date()
+                for i in imageItems.indices {
+                    if case .uploaded = imageItems[i].status, imageItems[i].uploadedAt == nil {
+                        imageItems[i].uploadedAt = now
+                    }
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             showSettings = true
         }
@@ -136,7 +170,8 @@ struct ContentView: View {
                 clipboard: clipboard,
                 onUpdate: { updateItem($0) },
                 onDelete: { handleDelete(item) },
-                onUploadComplete: { handleUploadResult($0) }
+                onUploadComplete: { handleUploadResult($0) },
+                onRename: { renameItem(item, to: $0) }
             )
             .tag(item.id)
         }
@@ -152,52 +187,105 @@ struct ContentView: View {
     private func syncFromR2() {
         isSyncing = true
         Task {
+            defer { isSyncing = false }
             do {
                 let objects = try await uploader.listObjects(config: r2Config)
                 let r2Keys = Set(objects.map(\.key))
 
-                // Update existing local items that match R2
+                // Update existing items and track matched keys
+                var matchedR2Keys: Set<String> = []
+                var localR2ItemIndices: [Int] = []
                 for i in imageItems.indices {
                     let ext = imageItems[i].outputFormat.isEmpty ? "avif" : imageItems[i].outputFormat
                     let localKey = imageItems[i].title.isEmpty ? nil : "\(imageItems[i].title).\(ext)"
-                    let origKey = imageItems[i].originalFilename
-                    let matchKey: String? = if let k = localKey, r2Keys.contains(k) { k }
-                        else if !origKey.isEmpty, r2Keys.contains(origKey) { origKey }
+                    let rk = imageItems[i].r2Key
+                    let matchKey: String? = if let rk = !rk.isEmpty ? rk : nil, r2Keys.contains(rk) { rk }
+                        else if let k = localKey, r2Keys.contains(k) { k }
                         else { nil }
                     guard let key = matchKey else { continue }
-                    let url = "\(r2Config.publicURLBaseNormalized)/\(key)"
+                    matchedR2Keys.insert(key)
+                    localR2ItemIndices.append(i)
                     if let obj = objects.first(where: { $0.key == key }) {
                         imageItems[i].webpSize = obj.size
                         imageItems[i].fileSize = obj.size
-                        let df = DateFormatter(); df.dateFormat = "yyyyMMdd"
-                        imageItems[i].dateString = df.string(from: obj.lastModified)
-                        imageItems[i].uploadedAt = obj.lastModified
+                        imageItems[i].r2Key = key
+                        imageItems[i].outputFormat = (key as NSString).pathExtension
+                        // Only sync date if not already set (preserve original upload date)
+                        if imageItems[i].uploadedAt == nil {
+                            let df = DateFormatter(); df.dateFormat = "yyyyMMdd"
+                            imageItems[i].dateString = df.string(from: obj.lastModified)
+                            imageItems[i].uploadedAt = obj.lastModified
+                        }
                     }
+                    let encodedPath = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? key
+                    let url = "\(r2Config.publicURLBaseNormalized)/\(encodedPath)"
                     if case .uploaded = imageItems[i].status { continue }
                     imageItems[i].status = .uploaded(url: url)
                 }
+                // Items marked uploaded but NOT on R2 → downgrade to ready
+                for i in imageItems.indices where !localR2ItemIndices.contains(i) {
+                    if case .uploaded = imageItems[i].status {
+                        imageItems[i].status = .ready
+                    }
+                }
 
-                // Import R2 objects not already in local list
+                // All known local keys (for dedup)
                 var localKeys: Set<String> = []
                 for item in imageItems {
-                    if !item.originalFilename.isEmpty { localKeys.insert(item.originalFilename) }
-                    if !item.title.isEmpty {
+                    if !item.r2Key.isEmpty { localKeys.insert(item.r2Key) }
+                    else if !item.title.isEmpty {
                         let ext = item.outputFormat.isEmpty ? "avif" : item.outputFormat
                         localKeys.insert("\(item.title).\(ext)")
                     }
                 }
-                for obj in objects where !localKeys.contains(obj.key) {
+                let newObjects = objects.filter { !localKeys.contains($0.key) }
+
+                // Concurrent HEAD: new objects + existing items (for metadata refresh)
+                let allMetaKeys = newObjects.map(\.key) + Array(matchedR2Keys)
+                let metaResults = await withTaskGroup(of: (String, String?).self) { group in
+                    for key in Set(allMetaKeys) {
+                        group.addTask {
+                            let meta = try? await uploader.headObject(key: key, config: r2Config)
+                            return (key, meta)
+                        }
+                    }
+                    var results: [String: String?] = [:]
+                    for await (key, meta) in group { results[key] = meta }
+                    return results
+                }
+
+                // Apply metadata to existing items
+                for i in imageItems.indices {
+                    let rk = imageItems[i].r2Key
+                    guard !rk.isEmpty, let metaJSON = metaResults[rk] ?? nil else { continue }
+                    imageItems[i].applyMetadataJSON(metaJSON)
+                }
+
+                // Import new objects
+                var newIDs = Set<UUID>()
+                for obj in newObjects {
                     let title = (obj.key as NSString).deletingPathExtension
                     var item = ImageItem()
                     item.title = title
+                    item.r2Key = obj.key
                     item.originalFilename = obj.key
+                    item.outputFormat = (obj.key as NSString).pathExtension
                     item.webpSize = obj.size
                     item.fileSize = obj.size
                     item.uploadedAt = obj.lastModified
                     let df = DateFormatter(); df.dateFormat = "yyyyMMdd"
                     item.dateString = df.string(from: obj.lastModified)
-                    item.status = .uploaded(url: "\(r2Config.publicURLBaseNormalized)/\(obj.key)")
+                    let encodedPath = obj.key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? obj.key
+                    item.status = .uploaded(url: "\(r2Config.publicURLBaseNormalized)/\(encodedPath)")
+                    if let metaJSON = metaResults[obj.key] ?? nil {
+                        item.applyMetadataJSON(metaJSON)
+                    }
+                    newIDs.insert(item.id)
                     imageItems.insert(item, at: 0)
+                }
+                // Select all newly imported items
+                if !newIDs.isEmpty {
+                    selectedItemIDs = newIDs
                 }
             } catch {
                 print("Sync failed: \(error)")
@@ -231,7 +319,11 @@ struct ContentView: View {
         ToolbarItemGroup {
             if r2Config.isValid {
                 Button(action: syncFromR2) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
+                    if isSyncing {
+                        ProgressView().scaleEffect(0.6)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
                 }
                 .disabled(isSyncing)
                 .help("Sync with R2")
@@ -259,7 +351,7 @@ struct ContentView: View {
             ? localURL
             : (r2URL ?? localURL)
         VStack(spacing: 0) {
-            if let cached = cachedPreview, cached.url == previewURL, cached.image.isValid {
+            if let cached = previewCache[previewURL], cached.image.isValid {
                 Image(nsImage: cached.image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -278,10 +370,6 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if item.webpSize > 0 || item.webpURL != nil {
-                ProgressView()
-                    .scaleEffect(0.8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 12) {
                     ProgressView()
@@ -346,14 +434,14 @@ struct ContentView: View {
                            resolution: hasOriginal ? item.formattedOriginalDimensions : "—")
                 if item.webpSize > 0 {
                     let nowFormat: String = {
-                        if item.uploadedAt != nil {
-                            return item.originalFilename.components(separatedBy: ".").last?.uppercased() ?? "—"
+                        if !item.r2Key.isEmpty {
+                            return (item.r2Key as NSString).pathExtension.uppercased()
                         }
                         return item.outputFormat.uppercased()
                     }()
                     let nowDim: String = {
                         if item.width > 0 { return item.formattedDimensions }
-                        if let c = cachedPreview, c.width > 0 {
+                        if let c = previewCache[previewURL], c.width > 0 {
                             return "\(c.width)\u{2009}\u{00d7}\u{2009}\(c.height)"
                         }
                         return "—"
@@ -367,7 +455,8 @@ struct ContentView: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
         .task(id: previewURL) {
-            cachedPreview = nil
+            // Don't reload if already cached
+            guard previewCache[previewURL] == nil else { return }
             let url = previewURL
             if let img = await Task.detached(priority: .userInitiated) { () -> (NSImage, Int, Int)? in
                 guard let data = try? Data(contentsOf: url), data.count > 0 else { return nil }
@@ -377,7 +466,7 @@ struct ContentView: View {
                 let h = rep?.pixelsHigh ?? Int(img.size.height)
                 return (img, w, h)
             }.value {
-                cachedPreview = (url, img.0, img.1, img.2)
+                previewCache[url] = (img.0, img.1, img.2)
             }
         }
     }
@@ -452,8 +541,21 @@ struct ContentView: View {
         guard let sel = selectedItem,
               let idx = imageItems.firstIndex(where: { $0.id == sel.id })
         else { return }
-        // If already selected, toggle back to none
-        imageItems[idx].category = sel.category == name ? "none" : name
+        let newCat = sel.category == name ? "none" : name
+        imageItems[idx].category = newCat
+
+        // Sync category to R2 metadata if uploaded
+        if case .uploaded = imageItems[idx].status {
+            let item = imageItems[idx]
+            Task {
+                do {
+                    try await uploader.updateMetadata(item: item, config: r2Config)
+                } catch {
+                    errorDetail = "Metadata sync failed: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
     }
 
     private func updateItem(_ updated: ImageItem) {
@@ -513,7 +615,7 @@ struct ContentView: View {
                 if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
                     imageItems[idx].status = .error("Delete failed")
                 }
-                errorMessage = error.localizedDescription
+                errorDetail = error.localizedDescription
                 showError = true
             }
         }
@@ -541,14 +643,67 @@ struct ContentView: View {
                     }
                 } catch {
                     if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
-                        imageItems[idx].status = .error(error.localizedDescription)
+                        imageItems[idx].status = .error("Upload failed")
                     }
+                    errorDetail = error.localizedDescription
+                    showError = true
                 }
             }
             isUploading = false
         }
     }
+    private func renameItem(_ item: ImageItem, to newBase: String) {
+        guard let idx = imageItems.firstIndex(where: { $0.id == item.id }) else { return }
+        var ext = (item.r2Key as NSString).pathExtension
+        if ext.isEmpty { ext = item.outputFormat.isEmpty ? "avif" : item.outputFormat }
+        let newKey = "\(newBase).\(ext)"
+
+        // Update local state immediately
+        imageItems[idx].title = newBase
+        imageItems[idx].r2Key = newKey
+        imageItems[idx].outputFormat = ext
+
+        if case .uploaded = item.status {
+            let oldCacheURL = ImageProcessor.cacheURL(for: item.title).deletingPathExtension().appendingPathExtension(ext)
+            Task {
+                do {
+                    let localURL = item.webpURL ?? oldCacheURL
+                    if FileManager.default.fileExists(atPath: localURL.path) {
+                        _ = try await uploader.upload(item: imageItems[idx], config: r2Config)
+                    } else if case .uploaded(let urlString) = item.status, let url = URL(string: urlString) {
+                        let (data, _) = try await URLSession.shared.data(from: url)
+                        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent(newKey)
+                        try data.write(to: tmpURL)
+                        var tmpItem = imageItems[idx]
+                        tmpItem.webpURL = tmpURL
+                        _ = try await uploader.upload(item: tmpItem, config: r2Config)
+                        try? FileManager.default.removeItem(at: tmpURL)
+                    }
+                    do { try await uploader.delete(item: item, config: r2Config) } catch {
+                        print("Rename: failed to delete old key: \(error)")
+                    }
+                    let encodedPath = newKey.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? newKey
+                    imageItems[idx].status = .uploaded(url: "\(r2Config.publicURLBaseNormalized)/\(encodedPath)")
+                    let newCacheURL = ImageProcessor.cacheURL(for: newBase).deletingPathExtension().appendingPathExtension(ext)
+                    if FileManager.default.fileExists(atPath: oldCacheURL.path) {
+                        try? FileManager.default.moveItem(at: oldCacheURL, to: newCacheURL)
+                    }
+                    imageItems[idx].webpURL = newCacheURL
+                } catch {
+                    errorDetail = "\(error)"
+                    showError = true
+                }
+            }
+        }
+    }
+
     private func handleUploadResult(_ item: ImageItem) {
+        // Track the actual R2 key and upload date
+        if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
+            let ext = item.outputFormat.isEmpty ? "avif" : item.outputFormat
+            imageItems[idx].r2Key = "\(item.title).\(ext)"
+            if imageItems[idx].uploadedAt == nil { imageItems[idx].uploadedAt = Date() }
+        }
         let cat = item.category.isEmpty ? r2Config.defaultCategory : item.category
         if cat == "none", case .uploaded(let url) = item.status {
             clipboard.copyToClipboard("![](" + url + ")")
@@ -658,14 +813,38 @@ struct SidebarRow: View {
     let onUpdate: (ImageItem) -> Void
     let onDelete: () -> Void
     let onUploadComplete: (ImageItem) -> Void
+    let onRename: (String) -> Void
+
+    @FocusState private var nameFieldFocused: Bool
+    @State private var isEditingName = false
+    @State private var editName: String = ""
+
+    private func startRename() {
+        editName = item.displayName
+        isEditingName = true
+        nameFieldFocused = true
+    }
+
+    private func commitRename() {
+        isEditingName = false
+        nameFieldFocused = false
+        let newName = editName.trimmingCharacters(in: .whitespaces)
+        guard !newName.isEmpty else { return }
+        // Strip extension if user typed it, renameItem will add the correct one
+        let baseName = (newName as NSString).deletingPathExtension
+        guard baseName != (item.displayName as NSString).deletingPathExtension else { return }
+        onRename(baseName)
+    }
 
     init(item: ImageItem, isSelected: Bool, config: R2Config, uploader: R2Uploader, clipboard: ClipboardService,
          onUpdate: @escaping (ImageItem) -> Void, onDelete: @escaping () -> Void,
-         onUploadComplete: @escaping (ImageItem) -> Void) {
+         onUploadComplete: @escaping (ImageItem) -> Void,
+         onRename: @escaping (String) -> Void) {
         self.item = item; self.isSelected = isSelected
         self.config = config; self.uploader = uploader
         self.clipboard = clipboard; self.onUpdate = onUpdate; self.onDelete = onDelete
         self.onUploadComplete = onUploadComplete
+        self.onRename = onRename
     }
 
     var body: some View {
@@ -674,9 +853,17 @@ struct SidebarRow: View {
                 .padding(.top, 5)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.displayName)
-                    .font(.system(.callout, design: .rounded))
-                    .lineLimit(1).truncationMode(.middle)
+                if isEditingName {
+                    TextField("", text: $editName)
+                        .textFieldStyle(.plain)
+                        .font(.system(.callout, design: .rounded))
+                        .focused($nameFieldFocused)
+                        .onSubmit { commitRename() }
+                } else {
+                    Text(item.displayName)
+                        .font(.system(.callout, design: .rounded))
+                        .lineLimit(1).truncationMode(.middle)
+                }
 
                 if case .processing = item.status {
                     Color.clear.frame(height: 12).overlay(alignment: .leading) { ShimmerBlock(width: 80, height: 10) }
@@ -718,8 +905,10 @@ struct SidebarRow: View {
                 Button(action: copyPredictedTOML) { Label("Export TOML", systemImage: "doc.on.clipboard") }
             }
             if case .uploaded = item.status {
-                Button(action: copyURL) { Label("Export URL", systemImage: "link") }
-                Button(action: copyOne) { Label("Export TOML", systemImage: "doc.on.clipboard") }
+                Button(action: startRename) { Label("Rename", systemImage: "pencil") }
+                Button(action: copyURL) { Label("Copy URL", systemImage: "link") }
+                Button(action: copyMarkdown) { Label("Copy Markdown", systemImage: "m.square") }
+                Button(action: copyOne) { Label("Copy TOML", systemImage: "t.square") }
             }
             Divider()
             Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
@@ -728,6 +917,10 @@ struct SidebarRow: View {
 
     private var cat: String { item.category }
     private var formattedDate: String {
+        if let d = item.uploadedAt {
+            let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+            return df.string(from: d)
+        }
         let ds = item.dateString
         guard ds.count == 8 else { return ds }
         return "\(ds.prefix(4))-\(ds.dropFirst(4).prefix(2))-\(ds.suffix(2))"
@@ -762,6 +955,12 @@ struct SidebarRow: View {
         }
     }
     private func copyOne() { clipboard.copyToClipboard(clipboard.generateTOML(for: item, config: config)) }
+    private func copyMarkdown() {
+        if case .uploaded(let url) = item.status {
+            clipboard.copyToClipboard("![](\(url))")
+        }
+    }
+
     private func copyURL() {
         if case .uploaded(let url) = item.status { clipboard.copyToClipboard(url) }
     }

@@ -14,6 +14,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     var originalColorSpace: String = ""
     var uploadedAt: Date?
     var outputFormat: String = ""  // actual output file extension, e.g. "avif"
+    var r2Key: String = ""        // actual R2 object key
     var category: String = ""
     var status: Status = .processing
     var originalFilename: String = ""
@@ -29,7 +30,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, hash16, title, dateString, fileSize, webpSize, width, height, originalWidth, originalHeight, originalColorSpace, uploadedAt, outputFormat, category, status, originalFilename
+        case id, hash16, title, dateString, fileSize, webpSize, width, height, originalWidth, originalHeight, originalColorSpace, uploadedAt, outputFormat, r2Key, category, status, originalFilename
     }
 
     enum Status: Hashable, Codable {
@@ -67,7 +68,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
 
     var displayName: String {
         // R2-imported: show actual R2 filename
-        if uploadedAt != nil, !originalFilename.isEmpty { return originalFilename }
+        if uploadedAt != nil, !r2Key.isEmpty { return r2Key }
         // After local compression: show generated title with actual format
         if !title.isEmpty { return "\(title).\(outputFormat)" }
         // Before compression: show original filename
@@ -100,5 +101,52 @@ struct ImageItem: Identifiable, Hashable, Codable {
 
     var displayColorSpace: String {
         originalColorSpace.isEmpty ? "—" : originalColorSpace
+    }
+
+    var metadataJSON: String {
+        var parts: [String] = []
+        if originalWidth > 0 { parts.append("ow=\(originalWidth)") }
+        if originalHeight > 0 { parts.append("oh=\(originalHeight)") }
+        if !originalColorSpace.isEmpty { parts.append("cs=\(originalColorSpace.cleanForMetadata)") }
+        if !category.isEmpty, category != "none" { parts.append("cat=\(category.cleanForMetadata)") }
+        let cleanOFN = originalFilename.cleanForMetadata
+        if cleanOFN.contains("."), !cleanOFN.contains(";"), cleanOFN.count < 256 {
+            parts.append("ofn=\(cleanOFN)")
+        }
+        if fileSize > 0 { parts.append("fs=\(fileSize)") }
+        if let uploadedAt { parts.append("ua=\(Int(uploadedAt.timeIntervalSince1970))") }
+        if width > 0 { parts.append("w=\(width)") }
+        if height > 0 { parts.append("h=\(height)") }
+        return parts.isEmpty ? "-" : parts.joined(separator: "&")
+    }
+
+    mutating func applyMetadataJSON(_ json: String) {
+        guard json != "-" else { return }
+        let pairs = json.components(separatedBy: "&")
+        for pair in pairs {
+            let kv = pair.components(separatedBy: "=")
+            guard kv.count == 2 else { continue }
+            let v = kv[1].cleanForMetadata
+            switch kv[0] {
+            case "ow": if let w = Int(v) { originalWidth = w }
+            case "oh": if let h = Int(v) { originalHeight = h }
+            case "cs": originalColorSpace = v
+            case "cat": category = v
+            case "ofn": originalFilename = v
+            case "fs": if let s = Int64(v) { fileSize = s }
+            case "ua": if let t = Int(v) { uploadedAt = Date(timeIntervalSince1970: TimeInterval(t)) }
+            case "w": if let wi = Int(v) { width = wi }
+            case "h": if let hi = Int(v) { height = hi }
+            default: break
+            }
+        }
+    }
+}
+
+extension String {
+    var cleanForMetadata: String {
+        replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\r", with: "")
+            .trimmingCharacters(in: .whitespaces)
     }
 }
