@@ -19,22 +19,14 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.7</string>
+	<string>0.2.8</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Personal use</string>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
-	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/laloe74/img2b/main/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>MCowBQYDK2VwAyEAFORJ1y8kHxacALQT8DEonJIz6t38uUuyjery3F+2tVo=</string>
-	<key>SUEnableInstallerLauncherService</key>
-	<false/>
 </dict>
 </plist>

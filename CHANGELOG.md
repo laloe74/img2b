@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.8 — 2026-05-25
+
+  - bee2f53 Auto-increment CFBundleVersion on release for Sparkle
+  - f4beafb Sparkle auto-update framework integration
+
+
 ## v0.2.7 — 2026-05-25
 
   - b5ac774 R2 rename, metadata sync, upload date, and various fixes
