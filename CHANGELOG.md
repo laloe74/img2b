@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.9 — 2026-05-25
+
+  - 3154050 Revert Sparkle integration
+
+
 ## v0.2.8 — 2026-05-25
 
   - bee2f53 Auto-increment CFBundleVersion on release for Sparkle
