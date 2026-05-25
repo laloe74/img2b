@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.7 — 2026-05-25
+
+  - b5ac774 R2 rename, metadata sync, upload date, and various fixes
+
+
 ## v0.2.6 — 2026-05-25
 
   - c3d43cb Clean preview panel: remove close button, color space, fix layout
