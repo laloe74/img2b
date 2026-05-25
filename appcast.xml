@@ -3,13 +3,13 @@
 <channel>
   <title>img2b</title>
   <item>
-    <title>Version 0.2.7</title>
-    <sparkle:version>1</sparkle:version>
-    <sparkle:shortVersionString>0.2.7</sparkle:shortVersionString>
+    <title>Version 0.2.8</title>
+    <sparkle:version>2</sparkle:version>
+    <sparkle:shortVersionString>0.2.8</sparkle:shortVersionString>
     <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-    <enclosure url="https://github.com/laloe74/img2b/releases/download/v0.2.7/img2b-v0.2.7.dmg"
-               sparkle:edSignature="Eo8s4ATzJtHn1UDtKpaN+QDuEqIoczXYoj1ZLW0LnqdBWb6HDkWE1n90bPbb/Si69rcRbywiNRo2qSzUTDWSCA=="
-               sparkle:length="1327872"
+    <enclosure url="https://github.com/laloe74/img2b/releases/download/v0.2.8/img2b-v0.2.8.dmg"
+               sparkle:edSignature="Wy6LtufPGDr+RDQ20WsrQMS/i62TxJcoUPMjGRKz7YFjGTaFAPgA7drkERwKZjP6bHJQ2DVDtdf+REDpDnqbBg=="
+               sparkle:length="1327867"
                type="application/octet-stream"/>
   </item>
 </channel>
