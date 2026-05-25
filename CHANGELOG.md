@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.6 — 2026-05-25
+
+  - c3d43cb Clean preview panel: remove close button, color space, fix layout
+
+
 ## v0.2.5 — 2026-05-25
 
   - 17c8973 Honest file format: extension matches actual content
