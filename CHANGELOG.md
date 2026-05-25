@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.5 — 2026-05-25
+
+  - 17c8973 Honest file format: extension matches actual content
+
+
 ## v0.2.4 — 2026-05-25
 
   - 0dc761d R2 sync, delete fix, and preview polish
