@@ -21,6 +21,9 @@ struct ContentView: View {
     @State private var previewItemID: UUID?
     @State private var showCategoryModal = false
     @State private var cachedPreview: (url: URL, image: NSImage)?
+    @State private var isSyncing = false
+    @State private var errorMessage: String?
+    @State private var showError = false
 
     private var selectedItem: ImageItem? {
         let id = previewItemID ?? selectedItemIDs.first
@@ -54,6 +57,11 @@ struct ContentView: View {
         .toolbar { appToolbar }
         .sheet(isPresented: $showSettings) {
             SettingsView(config: $r2Config, imageItems: $imageItems)
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK") {}
+        } message: {
+            Text(errorMessage ?? "")
         }
         .confirmationDialog("Delete from R2?", isPresented: $showDeleteConfirm) {
             Button(deleteDialogTitle, role: .destructive) {
@@ -110,8 +118,16 @@ struct ContentView: View {
         }
     }
 
+    private var sortedItems: [ImageItem] {
+        imageItems.sorted { a, b in
+            let da = a.uploadedAt ?? .distantFuture
+            let db = b.uploadedAt ?? .distantFuture
+            return da > db
+        }
+    }
+
     private var sidebarRows: some View {
-        ForEach(imageItems) { item in
+        ForEach(sortedItems) { item in
             SidebarRow(
                 item: item,
                 isSelected: selectedItemIDs.contains(item.id),
@@ -131,6 +147,58 @@ struct ContentView: View {
 
     private var sidebarHeader: some View {
         Text("Image List")
+    }
+
+    private func syncFromR2() {
+        isSyncing = true
+        Task {
+            do {
+                let objects = try await uploader.listObjects(config: r2Config)
+                let r2Keys = Set(objects.map(\.key))
+
+                // Update existing local items that match R2
+                for i in imageItems.indices {
+                    let avifKey = "\(imageItems[i].title).avif"
+                    let origKey = imageItems[i].originalFilename
+                    let matchKey: String? = if r2Keys.contains(avifKey) { avifKey }
+                        else if !origKey.isEmpty, r2Keys.contains(origKey) { origKey }
+                        else { nil }
+                    guard let key = matchKey else { continue }
+                    let url = "\(r2Config.publicURLBaseNormalized)/\(key)"
+                    if let obj = objects.first(where: { $0.key == key }) {
+                        imageItems[i].webpSize = obj.size
+                        imageItems[i].fileSize = obj.size
+                        let df = DateFormatter(); df.dateFormat = "yyyyMMdd"
+                        imageItems[i].dateString = df.string(from: obj.lastModified)
+                        imageItems[i].uploadedAt = obj.lastModified
+                    }
+                    if case .uploaded = imageItems[i].status { continue }
+                    imageItems[i].status = .uploaded(url: url)
+                }
+
+                // Import R2 objects not already in local list
+                var localKeys = Set(imageItems.map { "\($0.title).avif" })
+                for item in imageItems where !item.originalFilename.isEmpty {
+                    localKeys.insert(item.originalFilename)
+                }
+                for obj in objects where !localKeys.contains(obj.key) {
+                    let title = (obj.key as NSString).deletingPathExtension
+                    var item = ImageItem()
+                    item.title = title
+                    item.originalFilename = obj.key
+                    item.webpSize = obj.size
+                    item.fileSize = obj.size
+                    item.uploadedAt = obj.lastModified
+                    let df = DateFormatter(); df.dateFormat = "yyyyMMdd"
+                    item.dateString = df.string(from: obj.lastModified)
+                    item.status = .uploaded(url: "\(r2Config.publicURLBaseNormalized)/\(obj.key)")
+                    imageItems.insert(item, at: 0)
+                }
+            } catch {
+                print("Sync failed: \(error)")
+            }
+            isSyncing = false
+        }
     }
 
     @ToolbarContentBuilder
@@ -156,6 +224,13 @@ struct ContentView: View {
 
 
         ToolbarItemGroup {
+            if r2Config.isValid {
+                Button(action: syncFromR2) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+                .disabled(isSyncing)
+                .help("Sync with R2")
+            }
             Button(action: { showSettings = true }) {
                 Image(systemName: "gearshape")
             }
@@ -238,25 +313,26 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(item.title + ".avif").font(.caption).fontWeight(.medium)
+                        Text(item.displayName).font(.caption).fontWeight(.medium)
                             .padding(.bottom, 4)
                         Text(item.webpSize > 0
                              ? "\(Int((1 - item.compressionRatio) * 100))% smaller"
                              : " ")
                             .font(.caption2).foregroundStyle(.green)
                             .fontDesign(.monospaced)
-                        previewRow(label: "Original", format: originalFormat, size: item.formattedOriginalSize,
-                                   resolution: item.formattedOriginalDimensions != "-"
-                                       ? item.formattedOriginalDimensions
-                                       : (resolutionFor(url: item.originalURL) ?? "-"),
-                                   colorSpace: item.displayColorSpace != "-"
-                                       ? item.displayColorSpace
-                                       : (colorSpaceFor(url: item.originalURL) ?? "-"))
-                        previewRow(label: "Now", format: "AVIF", size: item.formattedWebPSize,
+                        let hasOriginal = item.originalWidth > 0 || item.fileSize > item.webpSize
+                        previewRow(label: "Original",
+                                   format: hasOriginal ? originalFormat : "—",
+                                   size: hasOriginal ? item.formattedOriginalSize : "—",
+                                   resolution: hasOriginal ? item.formattedOriginalDimensions : "—",
+                                   colorSpace: hasOriginal ? item.displayColorSpace : "—")
+                        let nowFormat = item.originalFilename.components(separatedBy: ".").last?.uppercased()
+                            ?? item.displayName.components(separatedBy: ".").last?.uppercased()
+                            ?? "—"
+                        let nowURL = item.webpURL ?? (item.originalFilename.isEmpty ? nil : ImageProcessor.cacheURL(for: item.title))
+                        previewRow(label: "Now", format: nowFormat, size: item.formattedWebPSize,
                                    resolution: item.formattedDimensions,
-                                   colorSpace: item.webpSize > 0
-                                       ? (colorSpaceFor(url: item.webpURL ?? ImageProcessor.cacheURL(for: item.title)) ?? "-")
-                                       : "-")
+                                   colorSpace: colorSpaceFor(url: nowURL) ?? "—")
                     }
                     Spacer()
                     Button { selectedItemIDs = []; previewItemID = nil } label: {
@@ -316,6 +392,7 @@ struct ContentView: View {
             Text(colorSpace)
                 .font(.caption2).foregroundStyle(.secondary)
                 .frame(width: 160, alignment: .leading)
+                .fontDesign(.monospaced)
                 .lineLimit(1)
         }
     }
@@ -323,7 +400,7 @@ struct ContentView: View {
     private var originalFormat: String {
         selectedItem?.originalURL?.pathExtension.uppercased()
             ?? selectedItem?.originalFilename.components(separatedBy: ".").last?.uppercased()
-            ?? "-"
+            ?? "—"
     }
 
     private func colorSpaceFor(url: URL?) -> String? {
@@ -406,8 +483,10 @@ struct ContentView: View {
                 removeFromList(item)
             } catch {
                 if let idx = imageItems.firstIndex(where: { $0.id == item.id }) {
-                    imageItems[idx].status = .error("Delete failed: \(error.localizedDescription)")
+                    imageItems[idx].status = .error("Delete failed")
                 }
+                errorMessage = error.localizedDescription
+                showError = true
             }
         }
     }
@@ -592,10 +671,6 @@ struct SidebarRow: View {
                         }
                     }
 
-                    if case .uploaded(let url) = item.status {
-                        Text(url).font(.caption2)
-                            .foregroundStyle(.secondary).lineLimit(1)
-                    }
                     if case .error(let msg) = item.status {
                         Text(msg).font(.caption2)
                             .foregroundStyle(.red).lineLimit(1)

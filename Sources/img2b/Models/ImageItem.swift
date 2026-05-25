@@ -12,6 +12,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     var originalWidth: Int = 0
     var originalHeight: Int = 0
     var originalColorSpace: String = ""
+    var uploadedAt: Date?
     var category: String = ""
     var status: Status = .processing
     var originalFilename: String = ""
@@ -27,7 +28,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, hash16, title, dateString, fileSize, webpSize, width, height, originalWidth, originalHeight, originalColorSpace, category, status, originalFilename
+        case id, hash16, title, dateString, fileSize, webpSize, width, height, originalWidth, originalHeight, originalColorSpace, uploadedAt, category, status, originalFilename
     }
 
     enum Status: Hashable, Codable {
@@ -64,9 +65,11 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     var displayName: String {
-        // Before compression: show original filename. After: show generated title.
+        // R2-imported or original file: show actual filename
+        if !originalFilename.isEmpty { return originalFilename }
+        // After local compression: show generated title
         if !title.isEmpty { return title + ".avif" }
-        return originalFilename
+        return "Untitled"
     }
 
     var formattedOriginalSize: String {
@@ -83,16 +86,16 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     var formattedOriginalDimensions: String {
-        guard originalWidth > 0 else { return "-" }
+        guard originalWidth > 0 else { return "—" }
         return "\(originalWidth)\u{2009}\u{00d7}\u{2009}\(originalHeight)"
     }
 
     var formattedDimensions: String {
-        guard width > 0 else { return "-" }
+        guard width > 0 else { return "—" }
         return "\(width)\u{2009}\u{00d7}\u{2009}\(height)"
     }
 
     var displayColorSpace: String {
-        originalColorSpace.isEmpty ? "-" : originalColorSpace
+        originalColorSpace.isEmpty ? "—" : originalColorSpace
     }
 }
