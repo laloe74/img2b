@@ -20,7 +20,7 @@ struct ContentView: View {
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var previewItemID: UUID?
     @State private var showCategoryModal = false
-    @State private var cachedPreview: (url: URL, image: NSImage)?
+    @State private var cachedPreview: (url: URL, image: NSImage, width: Int, height: Int)?
     @State private var isSyncing = false
     @State private var errorMessage: String?
     @State private var showError = false
@@ -251,19 +251,26 @@ struct ContentView: View {
     @ViewBuilder
     private func previewView(for item: ImageItem) -> some View {
         let localURL = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
+        let r2URL: URL? = {
+            if case .uploaded(let url) = item.status { return URL(string: url) }
+            return nil
+        }()
+        let previewURL = (localURL.isFileURL && FileManager.default.fileExists(atPath: localURL.path))
+            ? localURL
+            : (r2URL ?? localURL)
         VStack(spacing: 0) {
-            if let cached = cachedPreview, cached.url == localURL {
+            if let cached = cachedPreview, cached.url == previewURL, cached.image.isValid {
                 Image(nsImage: cached.image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if case .uploaded(let url) = item.status, let imageURL = URL(string: url) {
+            } else if let imageURL = r2URL {
                 AsyncImage(url: imageURL) { phase in
                     switch phase {
                     case .success(let image):
                         image.resizable().aspectRatio(contentMode: .fit)
                     case .failure:
-                        ContentUnavailableView("Load Failed", systemImage: "wifi.slash", description: Text(url))
+                        ContentUnavailableView("Load Failed", systemImage: "wifi.slash", description: Text(imageURL.absoluteString))
                     case .empty:
                         ProgressView()
                     @unknown default:
@@ -315,54 +322,62 @@ struct ContentView: View {
                 Divider()
             }
 
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Header
                 HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(item.displayName).font(.caption).fontWeight(.medium)
-                            .padding(.bottom, 4)
-                        Text(item.webpSize > 0
-                             ? "\(Int((1 - item.compressionRatio) * 100))% smaller"
-                             : " ")
-                            .font(.caption2).foregroundStyle(.green)
-                            .fontDesign(.monospaced)
-                        let hasOriginal = item.originalWidth > 0 || item.fileSize > item.webpSize
-                        previewRow(label: "Original",
-                                   format: hasOriginal ? originalFormat : "—",
-                                   size: hasOriginal ? item.formattedOriginalSize : "—",
-                                   resolution: hasOriginal ? item.formattedOriginalDimensions : "—",
-                                   colorSpace: hasOriginal ? item.displayColorSpace : "—")
-                        if item.webpSize > 0 {
-                            let nowFormat: String = {
-                                if item.uploadedAt != nil {
-                                    return item.originalFilename.components(separatedBy: ".").last?.uppercased() ?? "—"
-                                }
-                                return item.outputFormat.uppercased()
-                            }()
-                            let nowURL = item.webpURL ?? (item.originalFilename.isEmpty ? nil : ImageProcessor.cacheURL(for: item.title))
-                            previewRow(label: "Now", format: nowFormat, size: item.formattedWebPSize,
-                                       resolution: item.formattedDimensions,
-                                       colorSpace: colorSpaceFor(url: nowURL) ?? "—")
-                        } else {
-                            previewRow(label: "Now", format: "—", size: "—",
-                                       resolution: "—", colorSpace: "—")
-                        }
+                    Text(item.displayName)
+                        .font(.caption).fontWeight(.medium)
+                        .lineLimit(1).truncationMode(.middle)
+                    if item.webpSize > 0 && item.fileSize > 0 {
+                        Text("\(Int((1 - item.compressionRatio) * 100))%")
+                            .font(.caption2).fontWeight(.medium)
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
                     }
                     Spacer()
-                    Button { selectedItemIDs = []; previewItemID = nil } label: {
-                        Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
+                }
+
+                // Metadata rows
+                let hasOriginal = item.originalWidth > 0 || item.fileSize > item.webpSize
+                previewRow(label: "Original",
+                           format: hasOriginal ? originalFormat : "—",
+                           size: hasOriginal ? item.formattedOriginalSize : "—",
+                           resolution: hasOriginal ? item.formattedOriginalDimensions : "—")
+                if item.webpSize > 0 {
+                    let nowFormat: String = {
+                        if item.uploadedAt != nil {
+                            return item.originalFilename.components(separatedBy: ".").last?.uppercased() ?? "—"
+                        }
+                        return item.outputFormat.uppercased()
+                    }()
+                    let nowDim: String = {
+                        if item.width > 0 { return item.formattedDimensions }
+                        if let c = cachedPreview, c.width > 0 {
+                            return "\(c.width)\u{2009}\u{00d7}\u{2009}\(c.height)"
+                        }
+                        return "—"
+                    }()
+                    previewRow(label: "Now", format: nowFormat, size: item.formattedWebPSize,
+                               resolution: nowDim)
+                } else {
+                    previewRow(label: "Now", format: "—", size: "—", resolution: "—")
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
+            .padding(.horizontal, 12).padding(.vertical, 8)
         }
-        .task(id: localURL) {
+        .task(id: previewURL) {
             cachedPreview = nil
-            let url = localURL
-            if let img = await Task.detached(priority: .userInitiated) { () -> NSImage? in
-                NSImage(contentsOf: url)
+            let url = previewURL
+            if let img = await Task.detached(priority: .userInitiated) { () -> (NSImage, Int, Int)? in
+                guard let data = try? Data(contentsOf: url), data.count > 0 else { return nil }
+                guard let img = NSImage(data: data), img.isValid else { return nil }
+                let rep = img.representations.first
+                let w = rep?.pixelsWide ?? Int(img.size.width)
+                let h = rep?.pixelsHigh ?? Int(img.size.height)
+                return (img, w, h)
             }.value {
-                cachedPreview = (url, img)
+                cachedPreview = (url, img.0, img.1, img.2)
             }
         }
     }
@@ -385,28 +400,24 @@ struct ContentView: View {
         return "\(w)\u{2009}\u{00d7}\u{2009}\(h)"
     }
 
-    private func previewRow(label: String, format: String, size: String, resolution: String, colorSpace: String) -> some View {
-        HStack(spacing: 12) {
+    private func previewRow(label: String, format: String, size: String, resolution: String) -> some View {
+        HStack(spacing: 8) {
             Text(label)
-                .font(.caption2).fontWeight(.medium).foregroundStyle(.secondary)
-                .frame(width: 56, alignment: .leading)
+                .font(.caption2).fontWeight(.medium)
+                .foregroundStyle(.secondary)
+                .frame(width: 42, alignment: .leading)
             Text(format)
                 .font(.caption2).foregroundStyle(.secondary)
-                .frame(width: 36, alignment: .leading)
+                .frame(width: 34, alignment: .leading)
                 .fontDesign(.monospaced)
             Text(size)
                 .font(.caption2).foregroundStyle(.secondary)
-                .frame(width: 64, alignment: .trailing)
+                .frame(width: 50, alignment: .trailing)
                 .fontDesign(.monospaced)
             Text(resolution)
                 .font(.caption2).foregroundStyle(.secondary)
-                .frame(width: 88, alignment: .trailing)
+                .frame(width: 90, alignment: .trailing)
                 .fontDesign(.monospaced)
-            Text(colorSpace)
-                .font(.caption2).foregroundStyle(.secondary)
-                .frame(width: 160, alignment: .leading)
-                .fontDesign(.monospaced)
-                .lineLimit(1)
         }
     }
 
