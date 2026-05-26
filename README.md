@@ -33,7 +33,7 @@ macOS 原生博客图床工具。拖入图片 → 自动转 AVIF → 上传 R2/S
 category = "photography"
 date = 2026-05-24
 title = "img-5a833392f4b928b1-20260524"
-url = "https://image.tongmingzhi.com/img-5a833392f4b928b1-20260524.avif"
+url = "https://image.example.com/img-5a833392f4b928b1-20260524.avif"
 width = 2560
 height = 1440
 ```
