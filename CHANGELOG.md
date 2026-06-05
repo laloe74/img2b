@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.10 — 2026-06-05
+
+  - 7bf291d v0.2.10: Fix SignatureDoesNotMatch for non-ASCII filenames in R2 upload
+  - c796d53 Update README.md
+  - 59a9e49 Update README: fix outdated format (WebP→AVIF), compression docs, tech stack
+
+
 ## v0.2.9 — 2026-05-25
 
   - 3154050 Revert Sparkle integration
