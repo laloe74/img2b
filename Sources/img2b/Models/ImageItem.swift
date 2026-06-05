@@ -130,9 +130,9 @@ struct ImageItem: Identifiable, Hashable, Codable {
             switch kv[0] {
             case "ow": if let w = Int(v) { originalWidth = w }
             case "oh": if let h = Int(v) { originalHeight = h }
-            case "cs": originalColorSpace = v
-            case "cat": category = v
-            case "ofn": originalFilename = v
+            case "cs": originalColorSpace = v.uncleanFromMetadata
+            case "cat": category = v.uncleanFromMetadata
+            case "ofn": originalFilename = v.uncleanFromMetadata
             case "fs": if let s = Int64(v) { fileSize = s }
             case "ua": if let t = Int(v) { uploadedAt = Date(timeIntervalSince1970: TimeInterval(t)) }
             case "w": if let wi = Int(v) { width = wi }
@@ -145,8 +145,17 @@ struct ImageItem: Identifiable, Hashable, Codable {
 
 extension String {
     var cleanForMetadata: String {
-        replacingOccurrences(of: "\n", with: "")
+        let cleaned = replacingOccurrences(of: "\n", with: "")
             .replacingOccurrences(of: "\r", with: "")
             .trimmingCharacters(in: .whitespaces)
+        // Percent-encode non-ASCII chars so HTTP header stays ASCII-only (required for AWS4 signing)
+        var allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~")
+        allowed.insert(charactersIn: " ")
+        return cleaned.addingPercentEncoding(withAllowedCharacters: allowed) ?? cleaned
+    }
+
+    /// Reverse of cleanForMetadata: decode percent-encoded non-ASCII characters
+    var uncleanFromMetadata: String {
+        removingPercentEncoding ?? self
     }
 }
