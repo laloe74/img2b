@@ -140,7 +140,7 @@ struct ContentView: View {
                     onNewItems: { ids, firstID in
                         selectedItemIDs = ids
                         previewItemID = firstID
-                        NSApp.activate(ignoringOtherApps: true)
+                        NSApp.activate()
                     }
                 )
             }
@@ -458,15 +458,17 @@ struct ContentView: View {
             // Don't reload if already cached
             guard previewCache[previewURL] == nil else { return }
             let url = previewURL
-            if let img = await Task.detached(priority: .userInitiated) { () -> (NSImage, Int, Int)? in
+            let result: (Data, Int, Int)? = await Task.detached(priority: .userInitiated) {
                 guard let data = try? Data(contentsOf: url), data.count > 0 else { return nil }
-                guard let img = NSImage(data: data), img.isValid else { return nil }
-                let rep = img.representations.first
-                let w = rep?.pixelsWide ?? Int(img.size.width)
-                let h = rep?.pixelsHigh ?? Int(img.size.height)
-                return (img, w, h)
-            }.value {
-                previewCache[url] = (img.0, img.1, img.2)
+                guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+                      let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+                      let w = props[kCGImagePropertyPixelWidth] as? Int,
+                      let h = props[kCGImagePropertyPixelHeight] as? Int
+                else { return nil }
+                return (data, w, h)
+            }.value
+            if let result, let img = NSImage(data: result.0), img.isValid {
+                previewCache[url] = (img, result.1, result.2)
             }
         }
     }
@@ -756,7 +758,7 @@ struct ContentView: View {
                 }
                 selectedItemIDs = newIDs
                 previewItemID = firstID
-                NSApp.activate(ignoringOtherApps: true)
+                NSApp.activate()
 
                 // Phase 2: process each one
                 for (index, url) in validURLs.enumerated() {

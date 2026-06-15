@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.11 — 2026-06-15
+
+
+
+
 ## v0.2.10 — 2026-06-05
 
   - 7bf291d v0.2.10: Fix SignatureDoesNotMatch for non-ASCII filenames in R2 upload
