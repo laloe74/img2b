@@ -18,6 +18,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     var category: String = ""
     var status: Status = .processing
     var originalFilename: String = ""
+    var warning: String = ""
 
     // Not persisted
     var originalURL: URL?
@@ -30,7 +31,7 @@ struct ImageItem: Identifiable, Hashable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, hash16, title, dateString, fileSize, webpSize, width, height, originalWidth, originalHeight, originalColorSpace, uploadedAt, outputFormat, r2Key, category, status, originalFilename
+        case id, hash16, title, dateString, fileSize, webpSize, width, height, originalWidth, originalHeight, originalColorSpace, uploadedAt, outputFormat, r2Key, category, status, originalFilename, warning
     }
 
     enum Status: Hashable, Codable {

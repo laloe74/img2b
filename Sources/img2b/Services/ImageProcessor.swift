@@ -106,55 +106,58 @@ struct ImageProcessor: Sendable {
 
         onStep?(needsResize ? "Resizing to \(targetW)px wide..." : "Converting (L\(cl.rawValue))...")
 
-        let encoded = try encodeImage(cgImage, toWidth: targetW, quality: quality)
+        let (encoded, avifReason) = try encodeImage(cgImage, toWidth: targetW, quality: quality)
 
-        // Detect actual format from encoded data (AVIF vs HEIC fallback)
-        let encodedFormat: String
-        if encoded.count > 12 {
-            let tag = String(data: encoded[4..<8], encoding: .ascii) ?? ""
-            encodedFormat = tag.hasPrefix("ftyp") ? "heic" : "avif"
-        } else {
-            encodedFormat = "avif"
+        let ext = url.pathExtension.lowercased()
+        let origIsAVIF = (ext == "avif" || ext == "heic" || ext == "heif")
+
+        // If AVIF encoding succeeded and compressed smaller, use it
+        if avifReason == nil, encoded.count < data.count {
+            item.outputFormat = "avif"
+            let finalURL = cacheDir.appendingPathComponent("\(item.title).avif")
+            try encoded.write(to: finalURL)
+
+            if let src = CGImageSourceCreateWithData(encoded as CFData, nil),
+               let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+               let w = props[kCGImagePropertyPixelWidth] as? Int,
+               let h = props[kCGImagePropertyPixelHeight] as? Int {
+                item.width = w; item.height = h
+            }
+
+            var finalItem = item
+            finalItem.webpURL = finalURL
+            finalItem.webpSize = Int64(encoded.count)
+            finalItem.status = .ready
+            onStep?(nil)
+            return finalItem
         }
 
-        // If compression made it bigger, keep original file as-is
-        let finalData: Data
-        let finalOutputURL: URL
-        if encoded.count < data.count {
-            finalData = encoded
-            finalOutputURL = cacheDir.appendingPathComponent("\(item.title).\(encodedFormat)")
-            item.outputFormat = encodedFormat
-        } else {
-            // Keep original file with original extension
-            finalData = data
-            let ext = url.pathExtension.isEmpty ? encodedFormat : url.pathExtension
-            finalOutputURL = cacheDir.appendingPathComponent("\(item.title).\(ext)")
-            item.outputFormat = ext
-        }
+        // AVIF failed or didn't compress — keep original format
+        let reason = avifReason ?? "AVIF encoded file is larger than original"
+        item.warning = reason
+        let origExt = ext.isEmpty ? "jpg" : ext
+        item.outputFormat = origExt
+        let finalURL = cacheDir.appendingPathComponent("\(item.title).\(origExt)")
+        try data.write(to: finalURL)
 
-        try finalData.write(to: finalOutputURL)
-
-        // Read output dimensions
-        if let src = CGImageSourceCreateWithData(finalData as CFData, nil),
+        if let src = CGImageSourceCreateWithData(data as CFData, nil),
            let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
            let w = props[kCGImagePropertyPixelWidth] as? Int,
            let h = props[kCGImagePropertyPixelHeight] as? Int {
-            item.width = w
-            item.height = h
+            item.width = w; item.height = h
         }
 
-        onStep?(nil)
-
         var finalItem = item
-        finalItem.webpURL = finalOutputURL
-        finalItem.webpSize = Int64(finalData.count)
+        finalItem.webpURL = finalURL
+        finalItem.webpSize = Int64(data.count)
         finalItem.status = .ready
+        onStep?(nil)
         return finalItem
     }
 
     // MARK: - Resize + encode
 
-    private func encodeImage(_ image: CGImage, toWidth targetW: Int, quality: Int) throws -> Data {
+    private func encodeImage(_ image: CGImage, toWidth targetW: Int, quality: Int) throws -> (Data, String?) {
         let cgImage: CGImage
         let scale = min(CGFloat(targetW) / CGFloat(image.width), 1.0)
 
@@ -177,29 +180,27 @@ struct ImageProcessor: Sendable {
             cgImage = image
         }
 
-        return try encodeCGImage(cgImage, quality: quality)
+        return encodeCGImage(cgImage, quality: quality)
     }
 
     // MARK: - AVIF encoding (sRGB fallback only)
 
-    private func encodeCGImage(_ cgImage: CGImage, quality: Int) throws -> Data {
+    private func encodeCGImage(_ cgImage: CGImage, quality: Int) -> (Data, String?) {
         let q = CGFloat(quality) / 100.0
 
         // 1. Try raw
-        if let data = tryEncodeAVIF(cgImage, quality: q) { return data }
+        if let data = tryEncodeAVIF(cgImage, quality: q) { return (data, nil) }
 
         // 2. sRGB premultiplied alpha
         if let normalized = convertToSRGB(cgImage, alpha: .premultipliedLast),
-           let data = tryEncodeAVIF(normalized, quality: q) { return data }
+           let data = tryEncodeAVIF(normalized, quality: q) { return (data, nil) }
 
         // 3. sRGB straight alpha
         if let normalized = convertToSRGB(cgImage, alpha: .noneSkipLast),
-           let data = tryEncodeAVIF(normalized, quality: q) { return data }
+           let data = tryEncodeAVIF(normalized, quality: q) { return (data, nil) }
 
-        // 4. HEIC fallback
-        if let data = tryEncodeHEIC(cgImage, quality: q) { return data }
-
-        throw Error.encodeFailed("AVIF encoding failed for \(cgImage.width)x\(cgImage.height)")
+        let cs = cgImage.colorSpace?.name as? String ?? "unknown"
+        return (Data(), "AVIF 不支持当前色彩空间 (\(cs))，已保留原始格式")
     }
 
     private func tryEncodeAVIF(_ image: CGImage, quality: CGFloat) -> Data? {

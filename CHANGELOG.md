@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.13 — 2026-06-16
+
+  - New skeuomorphic app icon (wooden slingshot)
+  - AVIF encoding failure now keeps original format with orange warning instead of falling back to HEIC
+  - Remove startup update check dialog
+
+
 ## v0.2.12 — 2026-06-16
 
   - Fix AVIF encoding failure: add sRGB + HEIC fallback chain for incompatible color spaces

@@ -9,7 +9,6 @@ struct ContentView: View {
     @State private var processor = ImageProcessor()
     @State private var uploader = R2Uploader()
     @State private var clipboard = ClipboardService()
-    @State private var updater = Updater()
     @State private var showSettings = false
     @State private var isProcessing = false
     @State private var isUploading = false
@@ -108,7 +107,6 @@ struct ContentView: View {
         .onExitCommand { selectedItemIDs = []; previewItemID = nil }
         .background(WindowSeparatorRemover())
         .onAppear {
-            Task { await updater.checkForUpdates() }
             // One-time migration: populate upload dates
             if !UserDefaults.standard.bool(forKey: "migratedUploadDates") {
                 UserDefaults.standard.set(true, forKey: "migratedUploadDates")
@@ -942,6 +940,9 @@ struct SidebarRow: View {
                     if case .error(let msg) = item.status {
                         Text(msg).font(.caption2)
                             .foregroundStyle(.red).lineLimit(1)
+                    } else if !item.warning.isEmpty {
+                        Text(item.warning).font(.caption2)
+                            .foregroundStyle(.orange).lineLimit(2)
                     }
                 }
             }
