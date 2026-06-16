@@ -9,8 +9,8 @@ struct CategoryItem: Codable, Equatable, Hashable, Identifiable {
     static let defaultIcon = "tag"
     static let defaults: [CategoryItem] = [
         CategoryItem(name: "none", icon: "circle"),
-        CategoryItem(name: "design", icon: "paintpalette"),
         CategoryItem(name: "photography", icon: "camera"),
+        CategoryItem(name: "design", icon: "paintpalette"),
         CategoryItem(name: "physics", icon: "atom"),
         CategoryItem(name: "typography", icon: "textformat"),
     ]
@@ -34,6 +34,7 @@ struct R2Config: Codable, Equatable {
         url = "{url}"
         width = {width}
         height = {height}
+
         """
     var categories: [CategoryItem] = CategoryItem.defaults
     var defaultCategory: String = "none"

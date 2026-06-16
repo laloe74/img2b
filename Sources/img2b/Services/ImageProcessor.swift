@@ -81,7 +81,6 @@ struct ImageProcessor: Sendable {
         item.title = formatName(pattern: namePattern, hash16: item.hash16, hash: hashString, date: item.dateString)
 
         let cacheDir = Self.cacheDirectory()
-        let outputURL = cacheDir.appendingPathComponent("\(item.title).avif")
 
         let cl = Level(rawValue: min(6, max(1, level))) ?? .balanced
         let quality = cl.quality
@@ -109,17 +108,26 @@ struct ImageProcessor: Sendable {
 
         let encoded = try encodeImage(cgImage, toWidth: targetW, quality: quality)
 
+        // Detect actual format from encoded data (AVIF vs HEIC fallback)
+        let encodedFormat: String
+        if encoded.count > 12 {
+            let tag = String(data: encoded[4..<8], encoding: .ascii) ?? ""
+            encodedFormat = tag.hasPrefix("ftyp") ? "heic" : "avif"
+        } else {
+            encodedFormat = "avif"
+        }
+
         // If compression made it bigger, keep original file as-is
         let finalData: Data
         let finalOutputURL: URL
         if encoded.count < data.count {
             finalData = encoded
-            finalOutputURL = outputURL
-            item.outputFormat = "avif"
+            finalOutputURL = cacheDir.appendingPathComponent("\(item.title).\(encodedFormat)")
+            item.outputFormat = encodedFormat
         } else {
             // Keep original file with original extension
             finalData = data
-            let ext = url.pathExtension.isEmpty ? "avif" : url.pathExtension
+            let ext = url.pathExtension.isEmpty ? encodedFormat : url.pathExtension
             finalOutputURL = cacheDir.appendingPathComponent("\(item.title).\(ext)")
             item.outputFormat = ext
         }
@@ -177,10 +185,19 @@ struct ImageProcessor: Sendable {
     private func encodeCGImage(_ cgImage: CGImage, quality: Int) throws -> Data {
         let q = CGFloat(quality) / 100.0
 
+        // 1. Try raw
         if let data = tryEncodeAVIF(cgImage, quality: q) { return data }
 
-        if let normalized = convertToSRGB(cgImage),
+        // 2. sRGB premultiplied alpha
+        if let normalized = convertToSRGB(cgImage, alpha: .premultipliedLast),
            let data = tryEncodeAVIF(normalized, quality: q) { return data }
+
+        // 3. sRGB straight alpha
+        if let normalized = convertToSRGB(cgImage, alpha: .noneSkipLast),
+           let data = tryEncodeAVIF(normalized, quality: q) { return data }
+
+        // 4. HEIC fallback
+        if let data = tryEncodeHEIC(cgImage, quality: q) { return data }
 
         throw Error.encodeFailed("AVIF encoding failed for \(cgImage.width)x\(cgImage.height)")
     }
@@ -193,16 +210,24 @@ struct ImageProcessor: Sendable {
         return CGImageDestinationFinalize(dest) ? (data as Data) : nil
     }
 
-    private func convertToSRGB(_ cgImage: CGImage) -> CGImage? {
+    private func convertToSRGB(_ cgImage: CGImage, alpha: CGImageAlphaInfo = .premultipliedLast) -> CGImage? {
         let w = cgImage.width, h = cgImage.height
         guard let ctx = CGContext(
             data: nil, width: w, height: h,
             bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpace(name: CGColorSpace.sRGB)!,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            bitmapInfo: alpha.rawValue
         ) else { return nil }
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: w, height: h))
         return ctx.makeImage()
+    }
+
+    private func tryEncodeHEIC(_ image: CGImage, quality: CGFloat) -> Data? {
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, "public.heic" as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+        return CGImageDestinationFinalize(dest) ? (data as Data) : nil
     }
 
     // MARK: - Helpers

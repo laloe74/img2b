@@ -313,6 +313,10 @@ struct ContentView: View {
                 }
                 .help("Copy URL")
             }
+            let cats = r2Config.categories.filter { $0.name != "none" }
+            if selectedItemIDs.count > 1 && !cats.isEmpty {
+                categoryMenuButton(cats: cats)
+            }
         }
 
 
@@ -390,10 +394,17 @@ struct ContentView: View {
 
             // Category selector
             let cats = r2Config.categories.filter { $0.name != "none" }
+            let isMulti = selectedItemIDs.count > 1
             if !cats.isEmpty {
                 HStack(spacing: 4) {
                     ForEach(cats) { cat in
-                        let selected = item.category == cat.name || (item.category.isEmpty && cat.name == r2Config.defaultCategory)
+                        let selected: Bool = {
+                            if isMulti {
+                                let sel = selectedItems
+                                return !sel.isEmpty && sel.allSatisfy { $0.category == cat.name }
+                            }
+                            return item.category == cat.name || (item.category.isEmpty && cat.name == r2Config.defaultCategory)
+                        }()
                         Image(systemName: cat.icon)
                             .font(.system(size: 12, weight: .medium))
                             .frame(width: 28, height: 28)
@@ -401,7 +412,10 @@ struct ContentView: View {
                             .overlay { if !selected { Circle().stroke(.quaternary, lineWidth: 1) } }
                             .foregroundStyle(selected ? .white : .secondary)
                             .contentShape(Circle())
-                            .onTapGesture { toggleCategory(cat.name) }
+                            .onTapGesture {
+                                if isMulti { setCategoryForSelected(cat.name) }
+                                else { toggleCategory(cat.name) }
+                            }
                             .help(cat.name)
                     }
                     Spacer()
@@ -560,15 +574,52 @@ struct ContentView: View {
         }
     }
 
+    private func setCategoryForSelected(_ name: String) {
+        for id in selectedItemIDs {
+            guard let idx = imageItems.firstIndex(where: { $0.id == id }) else { continue }
+            imageItems[idx].category = name
+            if case .uploaded = imageItems[idx].status {
+                let item = imageItems[idx]
+                Task {
+                    do {
+                        try await uploader.updateMetadata(item: item, config: r2Config)
+                    } catch {
+                        errorDetail = "Metadata sync failed: \(error.localizedDescription)"
+                        showError = true
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func categoryMenuButton(cats: [CategoryItem]) -> some View {
+        let allSame = selectedItems.allSatisfy { $0.category == cats.first?.name || ($0.category.isEmpty && cats.first?.name == r2Config.defaultCategory) }
+        let activeIcon = allSame && selectedItems.first?.category != nil
+            ? r2Config.icon(for: selectedItems.first!.category)
+            : "tag"
+        Menu {
+            ForEach(cats) { cat in
+                Button {
+                    setCategoryForSelected(cat.name)
+                } label: {
+                    Label(cat.name, systemImage: cat.icon)
+                }
+            }
+        } label: {
+            Image(systemName: activeIcon)
+        }
+        .help("Set Category")
+    }
+
+    private var selectedItems: [ImageItem] {
+        selectedItemIDs.compactMap { id in imageItems.first { $0.id == id } }
+    }
+
     private func updateItem(_ updated: ImageItem) {
         if let idx = imageItems.firstIndex(where: { $0.id == updated.id }) {
             imageItems[idx] = updated
         }
-    }
-
-    private func isSelected(_ cat: String) -> Bool {
-        guard let sel = selectedItem else { return false }
-        return sel.category == cat
     }
 
     // MARK: - Actions

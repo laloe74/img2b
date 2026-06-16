@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.12 — 2026-06-16
+
+  - Fix AVIF encoding failure: add sRGB + HEIC fallback chain for incompatible color spaces
+  - Multi-select batch category assignment (toolbar menu + preview area)
+  - Default category order: photography, design, physics, typography
+  - TOML template: add trailing blank line after item block
+
+
 ## v0.2.11 — 2026-06-15
 
 
