@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.14 — 2026-06-16
+
+  - Replace app icon with Liquid Glass design
+  - AVIF encoding failure silently keeps original format (no warning shown)
+
+
 ## v0.2.13 — 2026-06-16
 
   - New skeuomorphic app icon (wooden slingshot)

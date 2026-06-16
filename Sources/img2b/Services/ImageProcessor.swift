@@ -112,7 +112,7 @@ struct ImageProcessor: Sendable {
         let origIsAVIF = (ext == "avif" || ext == "heic" || ext == "heif")
 
         // If AVIF encoding succeeded and compressed smaller, use it
-        if avifReason == nil, encoded.count < data.count {
+        if !encoded.isEmpty, encoded.count < data.count {
             item.outputFormat = "avif"
             let finalURL = cacheDir.appendingPathComponent("\(item.title).avif")
             try encoded.write(to: finalURL)
@@ -132,9 +132,7 @@ struct ImageProcessor: Sendable {
             return finalItem
         }
 
-        // AVIF failed or didn't compress — keep original format
-        let reason = avifReason ?? "AVIF encoded file is larger than original"
-        item.warning = reason
+        // AVIF didn't compress smaller or failed — keep original format
         let origExt = ext.isEmpty ? "jpg" : ext
         item.outputFormat = origExt
         let finalURL = cacheDir.appendingPathComponent("\(item.title).\(origExt)")
@@ -199,8 +197,7 @@ struct ImageProcessor: Sendable {
         if let normalized = convertToSRGB(cgImage, alpha: .noneSkipLast),
            let data = tryEncodeAVIF(normalized, quality: q) { return (data, nil) }
 
-        let cs = cgImage.colorSpace?.name as? String ?? "unknown"
-        return (Data(), "AVIF 不支持当前色彩空间 (\(cs))，已保留原始格式")
+        return (Data(), nil)
     }
 
     private func tryEncodeAVIF(_ image: CGImage, quality: CGFloat) -> Data? {
