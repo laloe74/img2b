@@ -3,21 +3,27 @@ import Foundation
 import ImageIO
 
 struct ImageProcessor: Sendable {
+
+    // MARK: - Error
+
     enum Error: Swift.Error, LocalizedError, Sendable {
-        case loadFailed(String)
+        case fileRead(String)
+        case decodeFailed(String)
         case encodeFailed(String)
-        case fileReadError
 
         var errorDescription: String? {
             switch self {
-            case .loadFailed(let msg): "Load failed: \(msg)"
+            case .fileRead(let msg): "File read failed: \(msg)"
+            case .decodeFailed(let msg): "Decode failed: \(msg)"
             case .encodeFailed(let msg): "Encode failed: \(msg)"
-            case .fileReadError: "Could not read image file"
             }
         }
     }
 
-    /// Compression levels matching Zipic's 6-level scale.
+    // MARK: - Compression Level
+
+    /// 1 = best quality (near‑lossless), 6 = smallest file (extreme).
+    /// Matches the slider label: left "Best Quality" → right "Lowest Quality".
     enum Level: Int, CaseIterable, Sendable {
         case nearLossless = 1
         case light = 2
@@ -29,223 +35,210 @@ struct ImageProcessor: Sendable {
         var label: String {
             switch self {
             case .nearLossless: "Near Lossless"
-            case .light: "Light"
-            case .balanced: "Balanced"
-            case .moderate: "Moderate"
-            case .aggressive: "Aggressive"
-            case .extreme: "Extreme"
+            case .light:        "Light"
+            case .balanced:     "Balanced"
+            case .moderate:     "Moderate"
+            case .aggressive:   "Aggressive"
+            case .extreme:      "Extreme"
             }
         }
 
         var description: String {
             switch self {
-            case .nearLossless: "Minimal data removal, maximum quality retention"
-            case .light: "Nearly imperceptible changes"
-            case .balanced: "Recommended for most images"
-            case .moderate: "Noticeable on close inspection"
-            case .aggressive: "Significant size reduction"
-            case .extreme: "Smallest files, visible quality trade-offs"
+            case .nearLossless: "Minimal quality loss"
+            case .light:        "Nearly imperceptible changes"
+            case .balanced:     "Recommended for most images"
+            case .moderate:     "Good compression / quality balance"
+            case .aggressive:   "Strong size reduction"
+            case .extreme:      "Smallest file, visible compression"
             }
         }
 
-        /// AVIF encoding quality (1–100).
-        var quality: Int {
-            switch self {
-            case .nearLossless: 95
-            case .light: 85
-            case .balanced: 78
-            case .moderate: 70
-            case .aggressive: 60
-            case .extreme: 50
-            }
-        }
+        /// AVIF quality 1–100. 1=best → 6=smallest.
+        var quality: CGFloat { [96, 88, 78, 60, 40, 20][rawValue - 1] }
     }
 
-    /// Single-pass compression: resize if over maxWidth, encode at fixed quality level.
-    nonisolated func processImage(at url: URL,
-                      level: Int = 3,
-                      maxWidth: Int = 0,
-                      namePattern: String = "img-{hash16}-{date}",
-                      onStep: (@Sendable (String?) -> Void)? = nil) async throws -> ImageItem {
+    // MARK: - Public API
+
+    nonisolated func processImage(
+        at url: URL,
+        level: Int = 3,
+        maxWidth: Int = 0,
+        namePattern: String = "img-{hash16}-{date}",
+        onStep: (@Sendable (String?) -> Void)? = nil
+    ) async throws -> ImageItem {
         var item = ImageItem(originalURL: url)
 
-        guard let data = try? Data(contentsOf: url) else { throw Error.fileReadError }
-        item.fileSize = Int64(data.count)
+        // 1. Read source file
+        guard let sourceData = try? Data(contentsOf: url)
+        else { throw Error.fileRead(url.path) }
+        item.fileSize = Int64(sourceData.count)
 
-        let hash = SHA256.hash(data: data)
-        let hashString = hash.map { String(format: "%02x", $0) }.joined()
-        item.hash16 = String(hashString.prefix(16))
+        // 2. Hash
+        let hash = SHA256.hash(data: sourceData)
+        let hex = hash.map { String(format: "%02x", $0) }.joined()
+        item.hash16 = String(hex.prefix(16))
 
+        // 3. Name
         let df = DateFormatter(); df.dateFormat = "yyyyMMdd"
         item.dateString = df.string(from: Date())
-        item.title = formatName(pattern: namePattern, hash16: item.hash16, hash: hashString, date: item.dateString)
+        item.title = formatName(pattern: namePattern, hash16: item.hash16, hash: hex, date: item.dateString)
 
-        let cacheDir = Self.cacheDirectory()
-
-        let cl = Level(rawValue: min(6, max(1, level))) ?? .balanced
-        let quality = cl.quality
-
-        // Load image
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else { throw Error.loadFailed("\(data.count) bytes, type unknown") }
+        // 4. Decode
+        guard let src = CGImageSourceCreateWithData(sourceData as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(src, 0, nil)
+        else { throw Error.decodeFailed("\(sourceData.count) bytes") }
 
         // Capture original metadata
-        item.originalWidth = cgImage.width
-        item.originalHeight = cgImage.height
-        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+        item.originalWidth = image.width
+        item.originalHeight = image.height
+        if let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
             item.originalColorSpace = (props[kCGImagePropertyProfileName] as? String)
-                ?? (props[kCGImagePropertyColorModel] as? String)
-                ?? ""
+                ?? (props[kCGImagePropertyColorModel] as? String) ?? ""
         }
 
-        // Resolve width: only resize if exceeding maxWidth (0 = no limit)
-        let origW = cgImage.width
-        let targetW = maxWidth > 0 ? min(origW, maxWidth) : origW
-        let needsResize = targetW < origW
+        // 5. Compression quality
+        let cl = Level(rawValue: min(6, max(1, level))) ?? .balanced
 
-        onStep?(needsResize ? "Resizing to \(targetW)px wide..." : "Converting (L\(cl.rawValue))...")
+        // 6. Resize if needed
+        let needsResize = (maxWidth > 0 && image.width > maxWidth)
+        onStep?(needsResize ? "Resizing to \(maxWidth)px…" : "Converting to AVIF…")
 
-        let (encoded, avifReason) = try encodeImage(cgImage, toWidth: targetW, quality: quality)
+        let finalImage = needsResize
+            ? try resize(image, toWidth: maxWidth)
+            : image
 
-        let ext = url.pathExtension.lowercased()
-        let origIsAVIF = (ext == "avif" || ext == "heic" || ext == "heif")
+        // 7. Encode to AVIF
+        let q = cl.quality / 100
+        let avifData = try encodeAVIF(finalImage, quality: q)
 
-        // If AVIF encoding succeeded and compressed smaller, use it
-        if !encoded.isEmpty, encoded.count < data.count {
+        // 8. Compare: only use AVIF if actually smaller
+        if avifData.count < Int(item.fileSize) {
             item.outputFormat = "avif"
-            let finalURL = cacheDir.appendingPathComponent("\(item.title).avif")
-            try encoded.write(to: finalURL)
+            item.webpSize = Int64(avifData.count)
+            let cached = cacheDir.appendingPathComponent("\(item.title).avif")
+            try avifData.write(to: cached)
+            item.webpURL = cached
 
-            if let src = CGImageSourceCreateWithData(encoded as CFData, nil),
-               let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
-               let w = props[kCGImagePropertyPixelWidth] as? Int,
-               let h = props[kCGImagePropertyPixelHeight] as? Int {
-                item.width = w; item.height = h
+            if let s = CGImageSourceCreateWithData(avifData as CFData, nil),
+               let p = CGImageSourceCopyPropertiesAtIndex(s, 0, nil) as? [CFString: Any] {
+                item.width = (p[kCGImagePropertyPixelWidth] as? Int) ?? finalImage.width
+                item.height = (p[kCGImagePropertyPixelHeight] as? Int) ?? finalImage.height
             }
-
-            var finalItem = item
-            finalItem.webpURL = finalURL
-            finalItem.webpSize = Int64(encoded.count)
-            finalItem.status = .ready
-            onStep?(nil)
-            return finalItem
-        }
-
-        // AVIF didn't compress smaller or failed — keep original format
-        let origExt = ext.isEmpty ? "jpg" : ext
-        item.outputFormat = origExt
-        let finalURL = cacheDir.appendingPathComponent("\(item.title).\(origExt)")
-        try data.write(to: finalURL)
-
-        if let src = CGImageSourceCreateWithData(data as CFData, nil),
-           let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
-           let w = props[kCGImagePropertyPixelWidth] as? Int,
-           let h = props[kCGImagePropertyPixelHeight] as? Int {
-            item.width = w; item.height = h
-        }
-
-        var finalItem = item
-        finalItem.webpURL = finalURL
-        finalItem.webpSize = Int64(data.count)
-        finalItem.status = .ready
-        onStep?(nil)
-        return finalItem
-    }
-
-    // MARK: - Resize + encode
-
-    private func encodeImage(_ image: CGImage, toWidth targetW: Int, quality: Int) throws -> (Data, String?) {
-        let cgImage: CGImage
-        let scale = min(CGFloat(targetW) / CGFloat(image.width), 1.0)
-
-        if scale < 1.0 {
-            let newW = Int(CGFloat(image.width) * scale)
-            let newH = Int(CGFloat(image.height) * scale)
-            guard let ctx = CGContext(
-                data: nil, width: newW, height: newH,
-                bitsPerComponent: 8, bytesPerRow: 0,
-                space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
-                bitmapInfo: image.bitmapInfo.rawValue
-            ) else { throw Error.encodeFailed("CGContext failed") }
-
-            ctx.interpolationQuality = .high
-            ctx.draw(image, in: CGRect(x: 0, y: 0, width: newW, height: newH))
-
-            guard let resized = ctx.makeImage() else { throw Error.encodeFailed("makeImage failed") }
-            cgImage = resized
         } else {
-            cgImage = image
+            // AVIF wasn't smaller — keep original format
+            let ext = url.pathExtension.lowercased().nonempty ?? "jpg"
+            item.outputFormat = ext
+            item.webpSize = Int64(sourceData.count)
+            item.width = finalImage.width
+            item.height = finalImage.height
+            let cached = cacheDir.appendingPathComponent("\(item.title).\(ext)")
+            try sourceData.write(to: cached)
+            item.webpURL = cached
         }
 
-        return encodeCGImage(cgImage, quality: quality)
+        item.status = .ready
+        onStep?(nil)
+        return item
     }
 
-    // MARK: - AVIF encoding (sRGB fallback only)
+    // MARK: - Resize (Core Graphics, no external tool)
 
-    private func encodeCGImage(_ cgImage: CGImage, quality: Int) -> (Data, String?) {
-        let q = CGFloat(quality) / 100.0
+    private func resize(_ image: CGImage, toWidth maxWidth: Int) throws -> CGImage {
+        let scale = CGFloat(maxWidth) / CGFloat(image.width)
+        let w = Int(CGFloat(image.width) * scale)
+        let h = Int(CGFloat(image.height) * scale)
 
-        // 1. Try raw
-        if let data = tryEncodeAVIF(cgImage, quality: q) { return (data, nil) }
+        guard let ctx = CGContext(
+            data: nil, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: image.bitmapInfo.rawValue
+        ) else { throw Error.encodeFailed("Cannot create resize context") }
 
-        // 2. sRGB premultiplied alpha
-        if let normalized = convertToSRGB(cgImage, alpha: .premultipliedLast),
-           let data = tryEncodeAVIF(normalized, quality: q) { return (data, nil) }
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
 
-        // 3. sRGB straight alpha
-        if let normalized = convertToSRGB(cgImage, alpha: .noneSkipLast),
-           let data = tryEncodeAVIF(normalized, quality: q) { return (data, nil) }
-
-        return (Data(), nil)
+        guard let resized = ctx.makeImage()
+        else { throw Error.encodeFailed("Resize failed") }
+        return resized
     }
 
-    private func tryEncodeAVIF(_ image: CGImage, quality: CGFloat) -> Data? {
+    // MARK: - AVIF encoding (3‑stage fallback for all color spaces)
+
+    /// Tries direct encode → sRGB premultiplied → sRGB straight alpha.
+    /// Covers virtually all macOS‑decodable images.
+    private func encodeAVIF(_ image: CGImage, quality: CGFloat) throws -> Data {
+        // 1. Direct: works for sRGB, Display P3 (if encoder supports it)
+        if let d = avifEncode(image, quality: quality) { return d }
+
+        // 2. Convert to sRGB with premultiplied alpha
+        if let normalized = convertToSRGB(image, alpha: .premultipliedLast),
+           let d = avifEncode(normalized, quality: quality) { return d }
+
+        // 3. Convert to sRGB without alpha — handles opaque images
+        if let normalized = convertToSRGB(image, alpha: .noneSkipLast),
+           let d = avifEncode(normalized, quality: quality) { return d }
+
+        throw Error.encodeFailed("AVIF encoding failed after 3 attempts")
+    }
+
+    private func avifEncode(_ image: CGImage, quality: CGFloat) -> Data? {
         let data = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(data, "public.avif" as CFString, 1, nil)
-        else { return nil }
-        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
-        return CGImageDestinationFinalize(dest) ? (data as Data) : nil
+        guard let dest = CGImageDestinationCreateWithData(
+            data, "public.avif" as CFString, 1, nil
+        ) else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: quality,
+            kCGImageDestinationOptimizeColorForSharing: true,
+        ]
+
+        CGImageDestinationAddImage(dest, image, options as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return data as Data
     }
 
-    private func convertToSRGB(_ cgImage: CGImage, alpha: CGImageAlphaInfo = .premultipliedLast) -> CGImage? {
-        let w = cgImage.width, h = cgImage.height
+    private func convertToSRGB(_ image: CGImage,
+                                alpha: CGImageAlphaInfo = .premultipliedLast) -> CGImage? {
+        let w = image.width, h = image.height
         guard let ctx = CGContext(
             data: nil, width: w, height: h,
             bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpace(name: CGColorSpace.sRGB)!,
             bitmapInfo: alpha.rawValue
         ) else { return nil }
-        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
         return ctx.makeImage()
     }
 
-    private func tryEncodeHEIC(_ image: CGImage, quality: CGFloat) -> Data? {
-        let data = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(data, "public.heic" as CFString, 1, nil)
-        else { return nil }
-        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
-        return CGImageDestinationFinalize(dest) ? (data as Data) : nil
-    }
-
-    // MARK: - Helpers
+    // MARK: - Cache
 
     static func cacheURL(for title: String) -> URL {
-        cacheDirectory().appendingPathComponent("\(title).avif")
+        cacheDir.appendingPathComponent("\(title).avif")
     }
 
-    static func cacheDirectory() -> URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("img2b/cache")
+    private static var cacheDir: URL {
+        let dir = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!.appendingPathComponent("img2b/cache")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
+    private var cacheDir: URL { Self.cacheDir }
+
+    // MARK: - Name Formatting
+
     private func formatName(pattern: String, hash16: String, hash: String, date: String) -> String {
         pattern
             .replacingOccurrences(of: "{hash16}", with: hash16)
-            .replacingOccurrences(of: "{hash8}", with: String(hash.prefix(8)))
-            .replacingOccurrences(of: "{hash}", with: hash)
-            .replacingOccurrences(of: "{date}", with: date)
+            .replacingOccurrences(of: "{hash8}",  with: String(hash.prefix(8)))
+            .replacingOccurrences(of: "{hash}",   with: hash)
+            .replacingOccurrences(of: "{date}",   with: date)
     }
+}
+
+private extension String {
+    var nonempty: String? { isEmpty ? nil : self }
 }

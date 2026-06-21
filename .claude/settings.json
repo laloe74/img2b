@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/soda/Project/img2b && bash Scripts/build-app.sh 2>&1 | tail -3",
+            "statusMessage": "Building and deploying to Desktop..."
+          }
+        ]
+      }
+    ]
+  }
+}

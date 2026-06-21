@@ -23,6 +23,8 @@ struct ContentView: View {
     @State private var isSyncing = false
     @State private var showError = false
     @State private var errorDetail = ""
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
+    @State private var showInspector = false
 
     private var selectedItem: ImageItem? {
         let id = previewItemID ?? selectedItemIDs.first
@@ -31,7 +33,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: $selectedItemIDs) {
                 Section {
                     if imageItems.isEmpty {
@@ -50,10 +52,16 @@ struct ContentView: View {
             .navigationTitle("")
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
-            detailContent
+            previewPane
                 .navigationTitle("")
+                .inspector(isPresented: $showInspector) {
+                    infoSidebar
+                        .inspectorColumnWidth(min: 240, ideal: 280, max: 360)
+                }
         }
+        .navigationSplitViewStyle(.balanced)
         .toolbar { appToolbar }
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .sheet(isPresented: $showSettings) {
             SettingsView(config: $r2Config, imageItems: $imageItems)
         }
@@ -123,10 +131,13 @@ struct ContentView: View {
         }
     }
 
-    private var detailContent: some View {
+    /// Left sidebar: image list
+    /// Middle: image preview or drop zone
+    /// Right sidebar: info panel (metadata + category selector)
+    private var previewPane: some View {
         VStack {
             if let item = selectedItem {
-                previewView(for: item)
+                imagePreview(for: item)
             } else {
                 DropZoneView(
                     imageItems: $imageItems,
@@ -147,6 +158,180 @@ struct ContentView: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDetailDrop(providers: providers)
             return true
+        }
+    }
+
+    /// Right sidebar: image metadata + category selector
+    @ViewBuilder
+    private var infoSidebar: some View {
+        if let item = selectedItem {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Metadata rows
+                    VStack(alignment: .leading, spacing: 8) {
+                        let hasOriginal = item.originalWidth > 0 || item.fileSize > item.webpSize
+                        Group {
+                            Text("Original")
+                                .font(.caption2).fontWeight(.semibold).foregroundStyle(.secondary)
+                            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 2) {
+                                GridRow {
+                                    Text("Format").gridColumnAlignment(.trailing)
+                                    Text(hasOriginal ? originalFormat : "—")
+                                }
+                                GridRow {
+                                    Text("Size")
+                                    Text(hasOriginal ? item.formattedOriginalSize : "—")
+                                }
+                                GridRow {
+                                    Text("Resolution")
+                                    Text(hasOriginal ? item.formattedOriginalDimensions : "—")
+                                }
+                            }
+                            .font(.caption2).foregroundStyle(.secondary)
+                        }
+
+                        if item.webpSize > 0 {
+                            let outputFormat: String = {
+                                if !item.r2Key.isEmpty {
+                                    return (item.r2Key as NSString).pathExtension.uppercased()
+                                }
+                                return item.outputFormat.uppercased()
+                            }()
+                            let outputDim: String = {
+                                if item.width > 0 { return item.formattedDimensions }
+                                let url = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
+                                if let c = previewCache[url], c.width > 0 {
+                                    return "\(c.width)\u{2009}\u{00d7}\u{2009}\(c.height)"
+                                }
+                                return "—"
+                            }()
+
+                            Text("Now")
+                                .font(.caption2).fontWeight(.semibold).foregroundStyle(.secondary)
+                                .padding(.top, 4)
+                            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 2) {
+                                GridRow {
+                                    Text("Format").gridColumnAlignment(.trailing)
+                                    Text(outputFormat)
+                                }
+                                GridRow {
+                                    Text("Size")
+                                    Text(item.formattedWebPSize)
+                                }
+                                GridRow {
+                                    Text("Resolution")
+                                    Text(outputDim)
+                                }
+                            }
+                            .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+
+                    Divider()
+
+                    // Category selector
+                    let cats = r2Config.categories.filter { $0.name != "none" }
+                    let isMulti = selectedItemIDs.count > 1
+                    if !cats.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Category")
+                                .font(.caption2).fontWeight(.semibold).foregroundStyle(.secondary)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 36, maximum: 40), spacing: 4)], spacing: 4) {
+                                ForEach(cats) { cat in
+                                    let selected: Bool = {
+                                        if isMulti {
+                                            let sel = selectedItems
+                                            return !sel.isEmpty && sel.allSatisfy { $0.category == cat.name }
+                                        }
+                                        return item.category == cat.name || (item.category.isEmpty && cat.name == r2Config.defaultCategory)
+                                    }()
+                                    Image(systemName: cat.icon)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .frame(width: 28, height: 28)
+                                        .background(Circle().fill(selected ? .blue : .clear))
+                                        .overlay { if !selected { Circle().stroke(.quaternary, lineWidth: 1) } }
+                                        .foregroundStyle(selected ? .white : .secondary)
+                                        .contentShape(Circle())
+                                        .onTapGesture {
+                                            if isMulti { setCategoryForSelected(cat.name) }
+                                            else { toggleCategory(cat.name) }
+                                        }
+                                        .help(cat.name)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                    }
+                }
+            }
+        } else {
+            EmptyView()
+        }
+    }
+
+    /// Pure image preview (no info, no category selector)
+    private func imagePreview(for item: ImageItem) -> some View {
+        let localURL = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
+        let r2URL: URL? = {
+            if case .uploaded(let url) = item.status { return URL(string: url) }
+            return nil
+        }()
+        let previewURL = (localURL.isFileURL && FileManager.default.fileExists(atPath: localURL.path))
+            ? localURL
+            : (r2URL ?? localURL)
+
+        return Group {
+            if let cached = previewCache[previewURL], cached.image.isValid {
+                Image(nsImage: cached.image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let imageURL = r2URL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fit)
+                    case .failure:
+                        ContentUnavailableView("Load Failed", systemImage: "wifi.slash", description: Text(imageURL.absoluteString))
+                    case .empty:
+                        ProgressView()
+                    @unknown default:
+                        ProgressView()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text(isProcessing ? "Processing..." : "Waiting...")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if !currentStep.isEmpty {
+                        Text(currentStep)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: previewURL) {
+            guard previewCache[previewURL] == nil else { return }
+            let url = previewURL
+            let result: (Data, Int, Int)? = await Task.detached(priority: .userInitiated) {
+                guard let data = try? Data(contentsOf: url), data.count > 0 else { return nil }
+                guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+                      let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+                      let w = props[kCGImagePropertyPixelWidth] as? Int,
+                      let h = props[kCGImagePropertyPixelHeight] as? Int
+                else { return nil }
+                return (data, w, h)
+            }.value
+            if let result, let img = NSImage(data: result.0), img.isValid {
+                previewCache[url] = (img, result.1, result.2)
+            }
         }
     }
 
@@ -294,6 +479,7 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var appToolbar: some ToolbarContent {
+        // Left: upload / delete / copy
         ToolbarItemGroup(placement: .navigation) {
             Button(action: uploadSelected) {
                 Image(systemName: "icloud.and.arrow.up")
@@ -317,7 +503,12 @@ struct ContentView: View {
             }
         }
 
+        // Spacer pushes sync+settings to the right
+        ToolbarItem(placement: .principal) {
+            Spacer()
+        }
 
+        // Sync + Settings
         ToolbarItemGroup {
             if r2Config.isValid {
                 Button(action: syncFromR2) {
@@ -335,6 +526,15 @@ struct ContentView: View {
             }
             .help("Settings")
         }
+
+        // Rightmost: inspector toggle
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button(action: { showInspector.toggle() }) {
+                Image(systemName: "sidebar.trailing")
+                    .symbolVariant(showInspector ? .fill : .none)
+            }
+            .help("Toggle Info Panel")
+        }
     }
 
     private var deleteDialogTitle: String { "Delete from R2 (\(itemsToDelete.count))" }
@@ -343,148 +543,6 @@ struct ContentView: View {
     // MARK: - Preview
 
     @ViewBuilder
-    private func previewView(for item: ImageItem) -> some View {
-        let localURL = item.webpURL ?? ImageProcessor.cacheURL(for: item.title)
-        let r2URL: URL? = {
-            if case .uploaded(let url) = item.status { return URL(string: url) }
-            return nil
-        }()
-        let previewURL = (localURL.isFileURL && FileManager.default.fileExists(atPath: localURL.path))
-            ? localURL
-            : (r2URL ?? localURL)
-        VStack(spacing: 0) {
-            if let cached = previewCache[previewURL], cached.image.isValid {
-                Image(nsImage: cached.image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let imageURL = r2URL {
-                AsyncImage(url: imageURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fit)
-                    case .failure:
-                        ContentUnavailableView("Load Failed", systemImage: "wifi.slash", description: Text(imageURL.absoluteString))
-                    case .empty:
-                        ProgressView()
-                    @unknown default:
-                        ProgressView()
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text(isProcessing ? "Processing..." : "Waiting...")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    if !currentStep.isEmpty {
-                        Text(currentStep)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-
-            Divider()
-
-            // Category selector
-            let cats = r2Config.categories.filter { $0.name != "none" }
-            let isMulti = selectedItemIDs.count > 1
-            if !cats.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(cats) { cat in
-                        let selected: Bool = {
-                            if isMulti {
-                                let sel = selectedItems
-                                return !sel.isEmpty && sel.allSatisfy { $0.category == cat.name }
-                            }
-                            return item.category == cat.name || (item.category.isEmpty && cat.name == r2Config.defaultCategory)
-                        }()
-                        Image(systemName: cat.icon)
-                            .font(.system(size: 12, weight: .medium))
-                            .frame(width: 28, height: 28)
-                            .background(Circle().fill(selected ? .blue : .clear))
-                            .overlay { if !selected { Circle().stroke(.quaternary, lineWidth: 1) } }
-                            .foregroundStyle(selected ? .white : .secondary)
-                            .contentShape(Circle())
-                            .onTapGesture {
-                                if isMulti { setCategoryForSelected(cat.name) }
-                                else { toggleCategory(cat.name) }
-                            }
-                            .help(cat.name)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                Divider()
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                // Header
-                HStack {
-                    Text(item.displayName)
-                        .font(.caption).fontWeight(.medium)
-                        .lineLimit(1).truncationMode(.middle)
-                    if item.webpSize > 0 && item.fileSize > 0 {
-                        Text("\(Int((1 - item.compressionRatio) * 100))%")
-                            .font(.caption2).fontWeight(.medium)
-                            .foregroundStyle(.green)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
-                    }
-                    Spacer()
-                }
-
-                // Metadata rows
-                let hasOriginal = item.originalWidth > 0 || item.fileSize > item.webpSize
-                previewRow(label: "Original",
-                           format: hasOriginal ? originalFormat : "—",
-                           size: hasOriginal ? item.formattedOriginalSize : "—",
-                           resolution: hasOriginal ? item.formattedOriginalDimensions : "—")
-                if item.webpSize > 0 {
-                    let nowFormat: String = {
-                        if !item.r2Key.isEmpty {
-                            return (item.r2Key as NSString).pathExtension.uppercased()
-                        }
-                        return item.outputFormat.uppercased()
-                    }()
-                    let nowDim: String = {
-                        if item.width > 0 { return item.formattedDimensions }
-                        if let c = previewCache[previewURL], c.width > 0 {
-                            return "\(c.width)\u{2009}\u{00d7}\u{2009}\(c.height)"
-                        }
-                        return "—"
-                    }()
-                    previewRow(label: "Now", format: nowFormat, size: item.formattedWebPSize,
-                               resolution: nowDim)
-                } else {
-                    previewRow(label: "Now", format: "—", size: "—", resolution: "—")
-                }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-        }
-        .task(id: previewURL) {
-            // Don't reload if already cached
-            guard previewCache[previewURL] == nil else { return }
-            let url = previewURL
-            let result: (Data, Int, Int)? = await Task.detached(priority: .userInitiated) {
-                guard let data = try? Data(contentsOf: url), data.count > 0 else { return nil }
-                guard let src = CGImageSourceCreateWithData(data as CFData, nil),
-                      let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
-                      let w = props[kCGImagePropertyPixelWidth] as? Int,
-                      let h = props[kCGImagePropertyPixelHeight] as? Int
-                else { return nil }
-                return (data, w, h)
-            }.value
-            if let result, let img = NSImage(data: result.0), img.isValid {
-                previewCache[url] = (img, result.1, result.2)
-            }
-        }
-    }
-
     // MARK: - Helpers
 
     private func propertiesFor(url: URL?) -> [CFString: Any]? {
